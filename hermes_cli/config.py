@@ -2198,6 +2198,17 @@ OPTIONAL_ENV_VARS = {
         "category": "provider",
         "advanced": True,
     },
+    # NOTE (P-010): Meituan LongCat 走 OpenAI-compatible 路径，v2 catalog 已经
+    # 收录 preset，但上游 OPTIONAL_ENV_VARS 没列；不补这条 dashboard /api/env
+    # 看不到 LONGCAT_API_KEY 入口。
+    "LONGCAT_API_KEY": {
+        "description": "美团 LongCat API key",
+        "prompt": "LongCat API key",
+        "url": "https://longcat.chat/platform/docs",
+        "password": True,
+        "category": "provider",
+        "advanced": True,
+    },
     "AWS_REGION": {
         "description": "AWS region for Bedrock API calls (e.g. us-east-1, eu-central-1)",
         "prompt": "AWS Region",
