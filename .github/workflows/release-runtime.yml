@@ -151,7 +151,7 @@ jobs:
             --artifact-path "out/$NAME.zip" \
             --upstream-repo "${GITHUB_REPOSITORY}" \
             --upstream-commit "${GITHUB_SHA}" \
-            --output "out/${{ matrix.platform }}-${{ matrix.arch }}.json"
+            --output "out/${{ steps.meta.outputs.channel }}-${{ matrix.platform }}-${{ matrix.arch }}.json"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -10,13 +10,22 @@ signed, and published.
 The client expects a per-platform manifest JSON at:
 
 ```
-${HERMES_RUNTIME_UPDATE_BASE_URL}/${channel}/${platform}-${arch}.json
+${HERMES_RUNTIME_UPDATE_BASE_URL}/${channel}-${platform}-${arch}.json
 ```
 
-For example with the GitHub Releases base URL:
+The filename is flat (no subdirectories) so GitHub Releases — where all
+assets for a tag share one directory — works out of the box. Pointing
+the base URL at `releases/latest/download` keeps the desktop on the
+newest published release automatically:
 
 ```
-https://github.com/Eynzof/hermes-agent-cn/releases/download/runtime-v0.13.0/stable/win32-x64.json
+https://github.com/Eynzof/hermes-agent-cn/releases/latest/download/stable-win32-x64.json
+```
+
+Pinning to a specific tag works too:
+
+```
+https://github.com/Eynzof/hermes-agent-cn/releases/download/runtime-v0.13.0/stable-win32-x64.json
 ```
 
 The manifest schema (see `src/process/runtime.rs::RuntimeUpdateManifest`
