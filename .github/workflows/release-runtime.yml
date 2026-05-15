@@ -1,0 +1,185 @@
+# Build, sign, and publish hermes-agent-cn runtime artifacts that the
+# hermes-cn-desktop-v2 client downloads on first launch.
+#
+# Trigger: push a tag matching `runtime-v*` (e.g. `runtime-v0.13.0`).
+# Per-platform jobs build a self-contained executable via PyInstaller,
+# zip it, sign the manifest with Ed25519, and attach all artifacts to a
+# GitHub Release.
+#
+# Required repository secret:
+#   RUNTIME_SIGN_PRIVATE_KEY_PEM
+#     The Ed25519 PEM-encoded private key. The matching public key is
+#     baked into the desktop binary via the HERMES_RUNTIME_UPDATE_PUBLIC_KEY_PEM_DEFAULT
+#     env var at build time. See docs/RUNTIME_RELEASES.md.
+#
+# Caveats (track in follow-up issues, not blockers for first run):
+#   - PyInstaller's autodetection misses lazy-imported provider SDKs
+#     (anthropic, firecrawl-py, etc.). Add them to hidden-imports as the
+#     ecosystem grows. The agent's `tools/lazy_deps.py` install flow won't
+#     work inside a frozen binary anyway — only the providers we pre-bake
+#     are usable. That's acceptable for v1; revisit when users complain.
+#   - Antivirus on Windows occasionally flags PyInstaller output. Sign
+#     the .exe (Authenticode) once you've registered a code-signing cert.
+#     Until then, document the false-positive in the release notes.
+
+name: release-runtime
+
+on:
+  push:
+    tags:
+      - "runtime-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver to tag the manifest with (e.g. 0.13.0+cn.20260516)"
+        required: true
+      channel:
+        description: "Release channel"
+        default: stable
+        type: choice
+        options: [stable, beta, canary]
+
+permissions:
+  contents: write  # needed to create the Release + upload assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: win32
+            arch: x64
+            ext: .exe
+          - runner: macos-latest
+            platform: darwin
+            arch: arm64
+            ext: ""
+          - runner: ubuntu-latest
+            platform: linux
+            arch: x64
+            ext: ""
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version + channel
+        id: meta
+        shell: bash
+        run: |
+          if [[ -n "${{ github.event.inputs.version }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            CHANNEL="${{ github.event.inputs.channel }}"
+          else
+            # tag is `runtime-v<semver>`; strip the prefix
+            VERSION="${GITHUB_REF_NAME#runtime-v}"
+            CHANNEL="stable"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build deps + agent
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          # Install the package itself so PyInstaller can import the entry point
+          pip install -e .
+          # Build tooling
+          pip install pyinstaller==6.* cryptography
+
+      - name: Build self-contained executable
+        shell: bash
+        run: |
+          # --onedir gives us a folder with shared libs + the binary; the
+          # client expects an executable named hermes-agent-cn-runtime-<platform>-<arch>{.ext}.
+          # Hidden imports cover modules PyInstaller doesn't discover via
+          # static analysis (lazy imports inside hermes_cli/main.py).
+          NAME="hermes-agent-cn-runtime-${{ matrix.platform }}-${{ matrix.arch }}"
+          pyinstaller --noconfirm \
+            --name "$NAME" \
+            --onedir \
+            --console \
+            --collect-submodules hermes_cli \
+            --collect-submodules tui_gateway \
+            --hidden-import gateway.status \
+            --paths . \
+            -p . \
+            hermes_cli/main.py
+          ls -la "dist/$NAME"
+
+      - name: Smoke-test the binary
+        shell: bash
+        run: |
+          NAME="hermes-agent-cn-runtime-${{ matrix.platform }}-${{ matrix.arch }}"
+          "./dist/$NAME/$NAME${{ matrix.ext }}" dashboard --help
+
+      - name: Zip artifact
+        shell: bash
+        run: |
+          NAME="hermes-agent-cn-runtime-${{ matrix.platform }}-${{ matrix.arch }}"
+          mkdir -p out
+          if [[ "${{ matrix.platform }}" == "win32" ]]; then
+            # PowerShell Compress-Archive on Windows runner
+            powershell -Command "Compress-Archive -Path dist/$NAME/* -DestinationPath out/$NAME.zip -Force"
+          else
+            (cd dist && zip -r "../out/$NAME.zip" "$NAME")
+          fi
+          ls -la out
+
+      - name: Sign manifest
+        shell: bash
+        env:
+          RUNTIME_SIGN_PRIVATE_KEY_PEM: ${{ secrets.RUNTIME_SIGN_PRIVATE_KEY_PEM }}
+        run: |
+          NAME="hermes-agent-cn-runtime-${{ matrix.platform }}-${{ matrix.arch }}"
+          # Anticipate the URL the Release will publish at — this has to
+          # match exactly because the signature covers it.
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${NAME}.zip"
+          python scripts/sign_runtime_manifest.py \
+            --channel "${{ steps.meta.outputs.channel }}" \
+            --version "${{ steps.meta.outputs.version }}" \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --artifact-url "$URL" \
+            --artifact-path "out/$NAME.zip" \
+            --upstream-repo "${GITHUB_REPOSITORY}" \
+            --upstream-commit "${GITHUB_SHA}" \
+            --output "out/${{ matrix.platform }}-${{ matrix.arch }}.json"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.platform }}-${{ matrix.arch }}
+          path: out/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: List downloaded
+        run: find dist -type f
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          # When running via workflow_dispatch there is no tag — skip the
+          # release step in that case (still useful for testing the build).
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/**/*.zip
+            dist/**/*.json
+          fail_on_unmatched_files: false
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+        if: startsWith(github.ref, 'refs/tags/runtime-v')
