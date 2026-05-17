@@ -28,7 +28,7 @@ jobs:
       - name: Add upstream remote and fetch
         run: |
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
-          git fetch upstream main
+          git fetch upstream main:refs/remotes/upstream/main
 
       - name: Compute ahead/behind
         id: status

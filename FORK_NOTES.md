@@ -1,6 +1,6 @@
 # Fork notes — Eynzof/hermes-agent-cn
 
-This document explains every commit on `main` that diverges from upstream `NousResearch/hermes-agent`. Each commit is tagged `[CN-fork] P-NNN` and listed below in commit order.
+This document explains the fork-specific changes on `main` that diverge from upstream `NousResearch/hermes-agent`. New behavioral patches should use `[CN-fork] P-NNN` in the commit message and be listed below.
 
 | ID | Target file | What it does | Why we need it | Upstream status |
 |---|---|---|---|---|
@@ -11,8 +11,20 @@ This document explains every commit on `main` that diverges from upstream `NousR
 | **P-006** | `hermes_cli/config.py` | Registers `OPTIONAL_ENV_VARS` for CN providers (ARK / QIANFAN / HUNYUAN / SILICONFLOW / MODELSCOPE / AI302 / COMPSHARE) | Dashboard env panel is metadata-driven; upstream only knows global providers (OpenAI / Anthropic / Google / DeepSeek) | Won't be upstreamed (CN-specific) |
 | **P-007** | `tui_gateway/ws.py` | Wraps the dispatch handler in a try/except that logs traceback + returns a JSON-RPC error response instead of silently closing the WS | Without this, any unhandled handler exception or json.dumps serialization failure shows up in the client as "WebSocket closed" with zero diagnostic context | Should be upstreamed |
 | **P-008** | `hermes_cli/web_server.py` | Adds `GET/PUT /api/profiles/active` (sticky active-profile getter/setter) | Upstream has list/create/delete/rename/SOUL but no symmetric active getter/setter — v2 web profile switcher needs HTTP access to this | Should be upstreamed |
+| **P-009** | `hermes_cli/web_server.py`, `tui_gateway/sse.py` | Adds SSE+POST gateway transport at `/api/v2/events` and `/api/v2/rpc` | desktop-v2 uses EventSource for streaming and POST for JSON-RPC to avoid WebSocket edge cases in packaged desktop runtimes | Maybe upstream |
+| **P-010** | `hermes_cli/config.py` | Registers `LONGCAT_API_KEY` in `OPTIONAL_ENV_VARS` | CN model settings need first-class LongCat credentials in the env panel | Won't be upstreamed unless upstream adopts LongCat |
+| **P-011** | `tui_gateway/server.py` | Adds `slug_filter` to `model.options` and `provider.probe` RPC | desktop-v2 needs filtered model picker options and a lightweight provider health probe | Maybe upstream |
 
 > **P-001** (provider dict-vs-list mismatch in `tui_gateway/server.py`) — **dropped from this fork**. Upstream has since fixed it; the line `user_provs = cfg.get("providers")` in `_apply_model_switch` already does the right thing.
+
+## Release/support changes
+
+These are fork maintenance changes, not runtime behavior patches:
+
+| Area | Target file | What it does |
+|---|---|---|
+| Upstream sync | `scripts/sync-upstream.sh`, `.github/workflows/upstream-watch.yml`, `MAINTAINING.md` | Keeps upstream syncs on temporary PR branches instead of merging directly into `main` |
+| Managed runtime | `.github/workflows/release-runtime.yml`, `scripts/sign_runtime_manifest.py`, `docs/RUNTIME_RELEASES.md` | Builds PyInstaller runtime artifacts, signs manifests, and publishes GitHub Releases consumed by desktop-v2 |
 
 ## Per-patch detail
 
@@ -130,3 +142,63 @@ Plus a 5000-entry cap to bound responses on huge directories.
 **Side effects**: None. File-backed sticky preference, mirroring `hermes profile use <name>` CLI behavior.
 
 **Should we upstream?** Yes — the symmetry gap is small and obvious. PR is straightforward.
+
+---
+
+### P-009: SSE+POST gateway transport
+
+**Symptom**: desktop-v2's packaged runtime needs a stable browser-friendly
+streaming transport. Relying only on `/api/ws` makes failures harder to
+debug and interacts poorly with some desktop shell/network setups.
+
+**Root cause**: Upstream exposes the TUI gateway over WebSocket. desktop-v2
+wants EventSource for server-to-client events and normal HTTP POST for
+client-to-server JSON-RPC.
+
+**What the patch does**:
+- Adds `GET /api/v2/events` for SSE frames.
+- Adds `POST /api/v2/rpc` for gateway JSON-RPC requests.
+- Adds `tui_gateway/sse.py` transport plumbing.
+
+**Side effects**: Adds another authenticated gateway transport surface.
+It uses the same session token model as the dashboard API.
+
+**Should we upstream?** Maybe. It is useful for browser-hosted dashboards
+and desktop shells, but it changes the supported gateway transport matrix.
+
+---
+
+### P-010: `LONGCAT_API_KEY`
+
+**Symptom**: CN model settings include LongCat, but the dashboard env
+metadata had no first-class `LONGCAT_API_KEY` entry.
+
+**Root cause**: Upstream provider metadata focuses on global providers and
+does not include this CN-specific key.
+
+**What the patch does**: Adds `LONGCAT_API_KEY` to `OPTIONAL_ENV_VARS`.
+
+**Side effects**: Env settings show one additional provider credential.
+
+**Should we upstream?** Only if upstream decides to support LongCat.
+
+---
+
+### P-011: Gateway model filtering and provider probe
+
+**Symptom**: desktop-v2 needs to filter model picker options by provider
+slug and run a lightweight provider health check without starting a full
+agent turn.
+
+**Root cause**: Upstream `model.options` returns broad picker data, and
+there was no small JSON-RPC method for provider probing.
+
+**What the patch does**:
+- Adds `slug_filter` support to `model.options`.
+- Adds a `provider.probe` gateway RPC.
+
+**Side effects**: Minimal. The new RPC should avoid returning secrets or
+raw provider config.
+
+**Should we upstream?** Maybe. The probe shape should be reviewed before
+opening an upstream PR.
