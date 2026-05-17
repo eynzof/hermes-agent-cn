@@ -88,6 +88,14 @@ class _OpenAIProxy:
     __slots__ = ()
 
     def __call__(self, *args, **kwargs):
+        if "http_client" not in kwargs:
+            try:
+                from agent.httpx_clients import build_openai_http_client
+
+                kwargs = dict(kwargs)
+                kwargs["http_client"] = build_openai_http_client()
+            except Exception:
+                pass
         return _load_openai_cls()(*args, **kwargs)
 
     def __instancecheck__(self, obj):
@@ -3047,6 +3055,12 @@ def _to_async_client(sync_client, model: str, is_vision: bool = False):
                     async_kwargs["default_headers"] = dict(_ph_async.default_headers)
         except Exception:
             pass
+    try:
+        from agent.httpx_clients import build_openai_async_http_client
+
+        async_kwargs["http_client"] = build_openai_async_http_client()
+    except Exception:
+        pass
     return AsyncOpenAI(**async_kwargs), model
 
 

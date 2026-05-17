@@ -2395,7 +2395,6 @@ class AIAgent:
     @staticmethod
     def _build_keepalive_http_client(base_url: str = "") -> Any:
         try:
-            import httpx as _httpx
             import socket as _socket
 
             _sock_opts = [(_socket.SOL_SOCKET, _socket.SO_KEEPALIVE, 1)]
@@ -2405,14 +2404,11 @@ class AIAgent:
                 _sock_opts.append((_socket.IPPROTO_TCP, _socket.TCP_KEEPCNT, 3))
             elif hasattr(_socket, "TCP_KEEPALIVE"):
                 _sock_opts.append((_socket.IPPROTO_TCP, _socket.TCP_KEEPALIVE, 30))
-            # When a custom transport is provided, httpx won't auto-read proxy
-            # from env vars (allow_env_proxies = trust_env and transport is None).
-            # Explicitly read proxy settings while still honoring NO_PROXY for
-            # loopback / local endpoints such as a locally hosted sub2api.
-            _proxy = _get_proxy_for_base_url(base_url)
-            return _httpx.Client(
-                transport=_httpx.HTTPTransport(socket_options=_sock_opts),
-                proxy=_proxy,
+            from agent.httpx_clients import build_httpx_client
+
+            return build_httpx_client(
+                base_url=base_url,
+                socket_options=_sock_opts,
             )
         except Exception:
             return None

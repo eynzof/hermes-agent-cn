@@ -754,6 +754,16 @@ def build_anthropic_client(
         if common_betas:
             kwargs["default_headers"] = {"anthropic-beta": ",".join(common_betas)}
 
+    try:
+        from agent.httpx_clients import build_httpx_client
+
+        kwargs["http_client"] = build_httpx_client(
+            base_url=normalized_base_url,
+            timeout=kwargs.get("timeout"),
+        )
+    except Exception:
+        pass
+
     return _anthropic_sdk.Anthropic(**kwargs)
 
 
