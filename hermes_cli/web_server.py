@@ -3301,10 +3301,38 @@ class SkillToggle(BaseModel):
     enabled: bool
 
 
+def _sync_bundled_skills_for_dashboard() -> None:
+    """Ensure dashboard-only launches still expose bundled skills.
+
+    ``hermes chat`` syncs bundled skills during CLI startup, but
+    ``hermes dashboard`` is also a first-class entrypoint for desktop builds.
+    Fresh profile/runtime homes would otherwise have an empty skills directory
+    until some other CLI command ran the sync path.
+    """
+    try:
+        from tools.skills_sync import sync_skills
+
+        result = sync_skills(quiet=True)
+        copied = len(result.get("copied") or [])
+        updated = len(result.get("updated") or [])
+        cleaned = len(result.get("cleaned") or [])
+        if copied or updated or cleaned:
+            _log.info(
+                "Dashboard synced bundled skills: copied=%s updated=%s cleaned=%s",
+                copied,
+                updated,
+                cleaned,
+            )
+    except Exception as e:
+        _log.warning("Dashboard bundled skills sync failed: %s", e)
+
+
 @app.get("/api/skills")
 async def get_skills():
     from tools.skills_tool import _find_all_skills
     from hermes_cli.skills_config import get_disabled_skills
+
+    _sync_bundled_skills_for_dashboard()
     config = load_config()
     disabled = get_disabled_skills(config)
     skills = _find_all_skills(skip_disabled=True)
