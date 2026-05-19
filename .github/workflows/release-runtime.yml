@@ -1,7 +1,7 @@
 # Build, sign, and publish hermes-agent-cn runtime artifacts that the
 # hermes-cn-desktop-v2 client downloads on first launch.
 #
-# Trigger: push a tag matching `runtime-v*` (e.g. `runtime-v0.13.0`).
+# Trigger: push a tag matching `runtime-v*-cn.*` (e.g. `runtime-v0.14.0-cn.1`).
 # Per-platform jobs build a self-contained executable via PyInstaller,
 # zip it, sign the manifest with Ed25519, and attach all artifacts to a
 # GitHub Release.
@@ -27,11 +27,11 @@ name: release-runtime
 on:
   push:
     tags:
-      - "runtime-v*"
+      - "runtime-v*-cn.*"
   workflow_dispatch:
     inputs:
       version:
-        description: "Semver to tag the manifest with (e.g. 0.13.0+cn.20260516)"
+        description: "Runtime version, e.g. 0.14.0-cn.1"
         required: true
       channel:
         description: "Release channel"
@@ -66,19 +66,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve version + channel
+      - name: Resolve runtime version + channel
         id: meta
         shell: bash
         run: |
           if [[ -n "${{ github.event.inputs.version }}" ]]; then
-            VERSION="${{ github.event.inputs.version }}"
+            RUNTIME_VERSION="${{ github.event.inputs.version }}"
             CHANNEL="${{ github.event.inputs.channel }}"
           else
-            # tag is `runtime-v<semver>`; strip the prefix
-            VERSION="${GITHUB_REF_NAME#runtime-v}"
+            # Tag is `runtime-v<kernelVersion>-cn.<revision>`; strip the prefix.
+            RUNTIME_VERSION="${GITHUB_REF_NAME#runtime-v}"
             CHANNEL="stable"
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ ! "$RUNTIME_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?)-([a-z][a-z0-9]*)\.([1-9][0-9]*)$ ]]; then
+            echo "Invalid runtime version: $RUNTIME_VERSION" >&2
+            echo "Expected <kernelVersion>-<flavor>.<revision>, e.g. 0.14.0-cn.1" >&2
+            exit 1
+          fi
+
+          KERNEL_VERSION="${BASH_REMATCH[1]}"
+          RUNTIME_FLAVOR="${BASH_REMATCH[3]}"
+          RUNTIME_REVISION="${BASH_REMATCH[4]}"
+          PYPROJECT_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)"/\1/p' pyproject.toml | head -n 1)"
+          if [[ -z "$PYPROJECT_VERSION" ]]; then
+            echo "Cannot find [project].version in pyproject.toml" >&2
+            exit 1
+          fi
+          if [[ "$PYPROJECT_VERSION" != "$KERNEL_VERSION" ]]; then
+            echo "Tag kernel version $KERNEL_VERSION does not match pyproject.toml version $PYPROJECT_VERSION" >&2
+            exit 1
+          fi
+
+          echo "runtime_version=$RUNTIME_VERSION" >> "$GITHUB_OUTPUT"
+          echo "kernel_version=$KERNEL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "runtime_flavor=$RUNTIME_FLAVOR" >> "$GITHUB_OUTPUT"
+          echo "runtime_revision=$RUNTIME_REVISION" >> "$GITHUB_OUTPUT"
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v5
@@ -161,13 +184,16 @@ jobs:
           URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${NAME}.zip"
           python scripts/sign_runtime_manifest.py \
             --channel "${{ steps.meta.outputs.channel }}" \
-            --version "${{ steps.meta.outputs.version }}" \
+            --runtime-version "${{ steps.meta.outputs.runtime_version }}" \
+            --kernel-version "${{ steps.meta.outputs.kernel_version }}" \
+            --runtime-flavor "${{ steps.meta.outputs.runtime_flavor }}" \
+            --runtime-revision "${{ steps.meta.outputs.runtime_revision }}" \
             --platform "${{ matrix.platform }}" \
             --arch "${{ matrix.arch }}" \
             --artifact-url "$URL" \
             --artifact-path "out/$NAME.zip" \
-            --upstream-repo "${GITHUB_REPOSITORY}" \
-            --upstream-commit "${GITHUB_SHA}" \
+            --source-repo "${GITHUB_REPOSITORY}" \
+            --source-commit "${GITHUB_SHA}" \
             --output "out/${{ steps.meta.outputs.channel }}-${{ matrix.platform }}-${{ matrix.arch }}.json"
 
       - name: Upload artifacts

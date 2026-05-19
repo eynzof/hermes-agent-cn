@@ -87,7 +87,7 @@ if git merge --no-ff "$UPSTREAM_REMOTE/$BASE_BRANCH"; then
   echo "  1. Run smoke tests from MAINTAINING.md"
   echo "  2. Push the sync branch: git push -u origin $SYNC_BRANCH"
   echo "  3. Open a PR from $SYNC_BRANCH into $BASE_BRANCH"
-  echo "  4. After merge, tag a runtime-v* release only from verified $BASE_BRANCH"
+  echo "  4. After merge, tag a runtime-v<kernelVersion>-cn.<revision> release only from verified $BASE_BRANCH"
 else
   echo ""
   echo "MERGE CONFLICT. Resolve manually on '$SYNC_BRANCH', then commit."

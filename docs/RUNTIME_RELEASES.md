@@ -25,33 +25,38 @@ https://github.com/Eynzof/hermes-agent-cn/releases/latest/download/stable-win32-
 Pinning to a specific tag works too:
 
 ```
-https://github.com/Eynzof/hermes-agent-cn/releases/download/runtime-v0.13.0/stable-win32-x64.json
+https://github.com/Eynzof/hermes-agent-cn/releases/download/runtime-v0.14.0-cn.1/stable-win32-x64.json
 ```
 
+The canonical versioning contract is documented in `docs/RUNTIME_VERSIONING.md`.
 The manifest schema (see `src/process/runtime.rs::RuntimeUpdateManifest`
-on the desktop side):
+on the desktop side) is schema v2:
 
 ```json
 {
+  "schemaVersion": 2,
   "channel": "stable",
-  "version": "0.13.0+cn.20260516",
+  "runtimeVersion": "0.14.0-cn.1",
+  "kernelVersion": "0.14.0",
+  "runtimeFlavor": "cn",
+  "runtimeRevision": 1,
   "platform": "win32",
   "arch": "x64",
-  "artifactUrl": "https://.../runtime-win32-x64.zip",
+  "artifactUrl": "https://.../hermes-agent-cn-runtime-win32-x64.zip",
   "sha256": "abcdef0123...",
   "signature": "base64-encoded Ed25519 signature",
-  "upstreamRepo": "Eynzof/hermes-agent-cn",
-  "upstreamCommit": "01edd139...",
+  "sourceRepo": "Eynzof/hermes-agent-cn",
+  "sourceCommit": "01edd139...",
   "minAppVersion": "0.1.0",
   "createdAt": "2026-05-16T03:00:00Z"
 }
 ```
 
-The signature is over the eight canonical fields concatenated with `\n`
+The signature is over the twelve canonical schema v2 fields concatenated with `\n`
 in this exact order:
 
 ```
-channel\nplatform\narch\nversion\nartifactUrl\nsha256\nupstreamRepo\nupstreamCommit
+schemaVersion\nchannel\nruntimeVersion\nkernelVersion\nruntimeFlavor\nruntimeRevision\nplatform\narch\nartifactUrl\nsha256\nsourceRepo\nsourceCommit
 ```
 
 `scripts/sign_runtime_manifest.py` builds this payload identically to
@@ -85,19 +90,20 @@ the old key and will reject anything signed by the new one.
 
 ## Cutting a release
 
-1. Tag the commit you want to ship:
+1. Pick the next CN runtime revision for the current `[project].version`; see `docs/RUNTIME_VERSIONING.md`.
+2. Tag the commit you want to ship:
    ```
-   git tag runtime-v0.13.0
-   git push origin runtime-v0.13.0
+   git tag runtime-v0.14.0-cn.1
+   git push origin runtime-v0.14.0-cn.1
    ```
-2. The `release-runtime` workflow runs once per platform (Windows / macOS-arm64 / Linux-x64).
-3. Each job:
+3. The `release-runtime` workflow validates the tag against `pyproject.toml` and runs once per platform (Windows / macOS-arm64 / Linux-x64).
+4. Each job:
    - Builds a self-contained executable via PyInstaller
    - Smoke-tests it (`dashboard --help` must exit 0)
    - Zips the dist directory as `hermes-agent-cn-runtime-<platform>-<arch>.zip`
    - Signs the manifest with `scripts/sign_runtime_manifest.py`
-4. The aggregate `release` job downloads all artifacts and publishes
-   them to a GitHub Release named `runtime-v0.13.0`.
+5. The aggregate `release` job downloads all artifacts and publishes
+   them to a GitHub Release named `runtime-v0.14.0-cn.1`.
 
 Once the release exists, every hermes-cn-desktop-v2 install whose
 manifest URL points at this base URL will pick up the update on next
