@@ -1,0 +1,35 @@
+name: repo-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Check README language links
+        run: |
+          set -euo pipefail
+          grep -q 'README.zh-CN.md' README.md
+          grep -q 'README.md' README.zh-CN.md
+          grep -q 'FORK_NOTES.md' README.md
+          grep -q 'FORK_NOTES.zh-CN.md' README.zh-CN.md
+          grep -q 'scripts/install.ps1' README.md
+
+      - name: Check for local private workspace references
+        run: |
+          set -euo pipefail
+          ! git grep -n -I -E '青岛|极鲸|万德|wanderminds|geekbi|李嘉乐|/Users/enzo|私有项目|仅限授权使用|竞品分析' -- \
+            README.md README.zh-CN.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md FORK_NOTES.md FORK_NOTES.zh-CN.md MAINTAINING.md MAINTAINING.zh-CN.md

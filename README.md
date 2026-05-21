@@ -48,6 +48,12 @@ Install from GitHub:
 pip install "git+https://github.com/Eynzof/hermes-agent-cn.git"
 ```
 
+For native Windows testing, the repository also includes the PowerShell installer at [`scripts/install.ps1`](./scripts/install.ps1):
+
+```powershell
+iex (irm https://raw.githubusercontent.com/Eynzof/hermes-agent-cn/main/scripts/install.ps1)
+```
+
 Then start Hermes:
 
 ```bash

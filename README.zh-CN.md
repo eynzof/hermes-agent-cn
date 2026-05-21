@@ -48,6 +48,12 @@ runtime-v<上游版本>-cn.<修订号>
 pip install "git+https://github.com/Eynzof/hermes-agent-cn.git"
 ```
 
+如果你要测试原生 Windows 安装，本仓库也提供 PowerShell 安装脚本 [`scripts/install.ps1`](./scripts/install.ps1)：
+
+```powershell
+iex (irm https://raw.githubusercontent.com/Eynzof/hermes-agent-cn/main/scripts/install.ps1)
+```
+
 然后启动 Hermes：
 
 ```bash
