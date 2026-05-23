@@ -6,11 +6,13 @@
 # zip it, sign the manifest with Ed25519, and attach all artifacts to a
 # GitHub Release.
 #
-# Required repository secret:
+# Required repository secrets:
 #   RUNTIME_SIGN_PRIVATE_KEY_PEM
 #     The Ed25519 PEM-encoded private key. The matching public key is
 #     baked into the desktop binary via the HERMES_RUNTIME_UPDATE_PUBLIC_KEY_PEM_DEFAULT
 #     env var at build time. See docs/RUNTIME_RELEASES.md.
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY
+#     Developer ID Application signing material for macOS runtime payloads.
 #
 # Caveats (track in follow-up issues, not blockers for first run):
 #   - PyInstaller's autodetection misses lazy-imported provider SDKs
@@ -158,6 +160,57 @@ jobs:
             hermes_cli/main.py
           ls -la "dist/$NAME"
 
+      - name: Normalize macOS framework layout
+        if: matrix.platform == 'darwin'
+        shell: bash
+        run: |
+          NAME="hermes-agent-cn-runtime-${{ matrix.platform }}-${{ matrix.arch }}"
+          python scripts/normalize_macos_pyinstaller_runtime.py "dist/$NAME"
+
+      - name: Prepare macOS signing credentials
+        if: matrix.platform == 'darwin'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          test -n "$APPLE_CERTIFICATE"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_SIGNING_IDENTITY"
+
+          signing_keychain_password="$(uuidgen)"
+          signing_keychain="$RUNNER_TEMP/hermes-runtime-signing.keychain-db"
+          certificate_path="$RUNNER_TEMP/hermes-runtime-apple-certificate.p12"
+
+          security create-keychain -p "$signing_keychain_password" "$signing_keychain"
+          security set-keychain-settings -lut 21600 "$signing_keychain"
+          security unlock-keychain -p "$signing_keychain_password" "$signing_keychain"
+
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security import "$certificate_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$signing_keychain"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$signing_keychain_password" \
+            "$signing_keychain"
+          security list-keychains -d user -s "$signing_keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$signing_keychain"
+
+      - name: Sign macOS runtime payload
+        if: matrix.platform == 'darwin'
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          NAME="hermes-agent-cn-runtime-${{ matrix.platform }}-${{ matrix.arch }}"
+          scripts/sign_macos_runtime_payload.sh "dist/$NAME"
+
       - name: Verify frozen provider SDKs
         shell: bash
         run: |
@@ -183,6 +236,10 @@ jobs:
           if [[ "${{ matrix.platform }}" == "win32" ]]; then
             # PowerShell Compress-Archive on Windows runner
             powershell -Command "Compress-Archive -Path dist/$NAME/* -DestinationPath out/$NAME.zip -Force"
+          elif [[ "${{ matrix.platform }}" == "darwin" ]]; then
+            # Preserve framework symlinks. Without -y, Info-ZIP stores the
+            # symlink targets as duplicate files and breaks codesign/notary.
+            (cd dist && zip -r -y "../out/$NAME.zip" "$NAME")
           else
             (cd dist && zip -r "../out/$NAME.zip" "$NAME")
           fi

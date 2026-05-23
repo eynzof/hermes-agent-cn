@@ -22,3 +22,13 @@ def test_runtime_workflow_freezes_anthropic_sdk_for_minimax_cn():
     assert "--collect-submodules anthropic" in workflow
     assert "--copy-metadata anthropic" in workflow
     assert "anthropic-*.dist-info" in workflow
+
+
+def test_runtime_workflow_signs_and_preserves_macos_frameworks():
+    workflow = _workflow_text()
+
+    assert "Normalize macOS framework layout" in workflow
+    assert "scripts/normalize_macos_pyinstaller_runtime.py" in workflow
+    assert "Prepare macOS signing credentials" in workflow
+    assert "scripts/sign_macos_runtime_payload.sh" in workflow
+    assert "zip -r -y" in workflow

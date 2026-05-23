@@ -106,7 +106,8 @@ Any change to that order must be made in both
    ```
 
 4. The `release-runtime` workflow validates that the tag's `kernelVersion`
-   matches `pyproject.toml`, builds the platform runtimes, writes schema v2
-   manifests, signs them, and publishes all assets to the GitHub Release.
+   matches `pyproject.toml`, builds the platform runtimes, normalizes and
+   Developer ID signs the macOS payload, writes schema v2 manifests, signs
+   them, and publishes all assets to the GitHub Release.
 
 Do not reuse a tag for a rebuilt runtime. Publish a new `cn.N` revision instead.

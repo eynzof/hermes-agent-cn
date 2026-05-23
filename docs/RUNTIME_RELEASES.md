@@ -85,6 +85,13 @@ If you need to rotate, generate a new pair, swap both:
 * Build env `HERMES_RUNTIME_UPDATE_PUBLIC_KEY_PEM_DEFAULT` in the
   hermes-cn-desktop-v2 release workflow
 
+macOS runtime releases also require the same Apple Developer ID signing
+secrets used by the desktop release workflow:
+
+* `APPLE_CERTIFICATE` — base64-encoded Developer ID Application `.p12`
+* `APPLE_CERTIFICATE_PASSWORD`
+* `APPLE_SIGNING_IDENTITY` — for example `Developer ID Application: ...`
+
 Cut a new desktop release at the same time — older desktop builds carry
 the old key and will reject anything signed by the new one.
 
@@ -99,8 +106,12 @@ the old key and will reject anything signed by the new one.
 3. The `release-runtime` workflow validates the tag against `pyproject.toml` and runs once per platform (Windows / macOS-arm64 / Linux-x64).
 4. Each job:
    - Builds a self-contained executable via PyInstaller
+   - On macOS, normalizes PyInstaller-collected `.framework` directories back
+     into standard symlink framework layouts
+   - On macOS, signs the full runtime payload with Developer ID before packaging
    - Smoke-tests it (`dashboard --help` must exit 0)
    - Zips the dist directory as `hermes-agent-cn-runtime-<platform>-<arch>.zip`
+     and preserves symlinks for macOS artifacts
    - Signs the manifest with `scripts/sign_runtime_manifest.py`
 5. The aggregate `release` job downloads all artifacts and publishes
    them to a GitHub Release named `runtime-v0.14.0-cn.1`.
@@ -125,6 +136,15 @@ $ ./dist/hermes-agent-cn-runtime-win32-x64/hermes-agent-cn-runtime-win32-x64.exe
 $ # zip + sign manually using scripts/sign_runtime_manifest.py
 ```
 
+For a macOS dry run after PyInstaller has produced `dist/hermes-agent-cn-runtime-darwin-arm64`:
+
+```bash
+$ python scripts/normalize_macos_pyinstaller_runtime.py dist/hermes-agent-cn-runtime-darwin-arm64
+$ APPLE_SIGNING_IDENTITY="Developer ID Application: ..." \
+    scripts/sign_macos_runtime_payload.sh dist/hermes-agent-cn-runtime-darwin-arm64
+$ (cd dist && zip -r -y ../out/hermes-agent-cn-runtime-darwin-arm64.zip hermes-agent-cn-runtime-darwin-arm64)
+```
+
 ## Known gaps
 
 * **Dashboard deps are bundled**: runtime artifacts must install `.[web]` and
@@ -135,8 +155,9 @@ $ # zip + sign manually using scripts/sign_runtime_manifest.py
   PyInstaller-frozen binary, so only providers we explicitly pre-bake
   are available. Add to the workflow's `--hidden-import` list as
   needed.
-* **Code signing**: PyInstaller-produced Windows .exe is often flagged
-  by SmartScreen until signed with an Authenticode cert. Register one
-  and add the signing step to the workflow.
+* **Code signing**: macOS runtime payloads are Developer ID signed in CI before
+  they are zipped. PyInstaller-produced Windows `.exe` files are still often
+  flagged by SmartScreen until signed with an Authenticode cert. Register one
+  and add the Windows signing step to the workflow.
 * **Cross-arch builds**: x64-only for Linux today. Add arm64 matrix
   entry once we have a runner.
