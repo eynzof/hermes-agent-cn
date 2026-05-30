@@ -77,6 +77,47 @@ hermes doctor       # 诊断常见问题
 
 上游用户文档位于 [hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/)。fork 专属说明保存在本仓库中。
 
+---
+
+## 省去到处收集 API Key — Nous Portal
+
+Hermes 始终允许你使用任意服务商，这点不会改变。但如果你不想为模型、网页搜索、图像生成、TTS、云浏览器分别去申请五个不同的 API Key，**[Nous Portal](https://portal.nousresearch.com)** 用一个订阅就能覆盖全部：
+
+- **300+ 模型** — 用 `/model <name>` 随时切换
+- **Tool Gateway** — 网页搜索（Firecrawl）、图像生成（FAL）、文本转语音（OpenAI）、云浏览器（Browser Use），全部通过订阅托管。无需额外注册任何账户。
+
+全新安装时一条命令即可：
+
+```bash
+hermes setup --portal
+```
+
+它会通过 OAuth 登录、把 Nous 设为推理服务商，并启用 Tool Gateway。随时用 `hermes portal status` 查看路由状态。完整说明见 [Tool Gateway 文档](https://hermes-agent.nousresearch.com/docs/user-guide/features/tool-gateway)。
+
+你随时可以按工具单独切回自己的 API Key — Gateway 是按工具粒度生效的，不是一刀切。
+
+---
+
+## CLI 与消息平台 快速对照
+
+Hermes 有两种入口：用 `hermes` 启动终端 UI，或运行网关从 Telegram、Discord、Slack、WhatsApp、Signal 或 Email 与之对话。进入对话后，许多斜杠命令在两种界面中通用。
+
+| 操作 | CLI | 消息平台 |
+|------|-----|----------|
+| 开始对话 | `hermes` | 运行 `hermes gateway setup` + `hermes gateway start`，然后给机器人发消息 |
+| 开始新对话 | `/new` 或 `/reset` | `/new` 或 `/reset` |
+| 更换模型 | `/model [provider:model]` | `/model [provider:model]` |
+| 设置人格 | `/personality [name]` | `/personality [name]` |
+| 重试或撤销上一轮 | `/retry`、`/undo` | `/retry`、`/undo` |
+| 压缩上下文 / 查看用量 | `/compress`、`/usage`、`/insights [--days N]` | `/compress`、`/usage`、`/insights [days]` |
+| 浏览技能 | `/skills` 或 `/<skill-name>` | `/skills` 或 `/<skill-name>` |
+| 中断当前工作 | `Ctrl+C` 或发送新消息 | `/stop` 或发送新消息 |
+| 平台特定状态 | `/platforms` | `/status`、`/sethome` |
+
+完整命令列表请参阅 [CLI 指南](https://hermes-agent.nousresearch.com/docs/user-guide/cli) 和 [消息网关指南](https://hermes-agent.nousresearch.com/docs/user-guide/messaging)。
+
+---
+
 ## 开发环境
 
 克隆仓库并以 editable 模式安装：

@@ -265,7 +265,7 @@ else
     # if mistral can't resolve.
     _BROKEN_EXTRAS=()  # populate when an extra becomes unresolvable
     _ALL_EXTRAS=(
-        modal daytona vercel messaging matrix cron cli dev tts-premium slack
+        modal daytona messaging matrix cron cli dev tts-premium slack
         pty honcho mcp homeassistant sms acp voice dingtalk feishu google
         bedrock web youtube
     )
@@ -395,6 +395,8 @@ if [ ! -f "$HERMES_HOME/.env" ]; then
 else
     echo -e "${GREEN}✓${NC} $HERMES_HOME/.env exists"
 fi
+# $HERMES_HOME/.env holds API keys — restrict to owner-only access and
+# tighten existing files that may have been created under a permissive umask.
 chmod 600 "$HERMES_HOME/.env" 2>/dev/null || true
 
 if [ ! -f "$HERMES_HOME/config.yaml" ] && [ -f "cli-config.yaml.example" ]; then
