@@ -1211,7 +1211,7 @@ def _transcribe_local_command(file_path: str, model_name: str) -> Dict[str, Any]
             if use_shell:
                 subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
             else:
-                subprocess.run(shlex.split(command), check=True, capture_output=True, text=True)
+                subprocess.run(shlex.split(command, posix=os.name == "posix"), check=True, capture_output=True, text=True)
             
 
             txt_files = sorted(Path(output_dir).glob("*.txt"))

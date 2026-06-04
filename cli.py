@@ -6161,7 +6161,7 @@ class HermesCLI:
                 _cprint(line)
 
         try:
-            parts = shlex.split(cmd)
+            parts = shlex.split(cmd, posix=os.name == "posix")
         except ValueError:
             parts = cmd.split()
 
@@ -8090,7 +8090,7 @@ class HermesCLI:
                     i += 1
             return opts
 
-        tokens = shlex.split(cmd)
+        tokens = shlex.split(cmd, posix=os.name == "posix")
 
         if len(tokens) == 1:
             print()
@@ -8271,7 +8271,7 @@ class HermesCLI:
         """
         import shlex
 
-        tokens = shlex.split(cmd)[1:] if cmd else []
+        tokens = shlex.split(cmd, posix=os.name == "posix")[1:] if cmd else []
         if not tokens:
             tokens = ["status"]
 

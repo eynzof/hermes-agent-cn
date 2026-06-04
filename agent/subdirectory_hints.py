@@ -150,7 +150,7 @@ class SubdirectoryHintTracker:
     def _extract_paths_from_command(self, cmd: str, candidates: Set[Path]):
         """Extract path-like tokens from a shell command string."""
         try:
-            tokens = shlex.split(cmd)
+            tokens = shlex.split(cmd, posix=os.name == "posix")
         except ValueError:
             tokens = cmd.split()
 

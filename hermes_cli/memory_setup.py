@@ -130,7 +130,7 @@ def _install_dependencies(provider_name: str) -> None:
         if check_cmd:
             try:
                 subprocess.run(
-                    shlex.split(check_cmd), check=True, capture_output=True, timeout=5
+                    shlex.split(check_cmd, posix=os.name == "posix"), check=True, capture_output=True, timeout=5
                 )
             except Exception:
                 if install_cmd:

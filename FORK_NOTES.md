@@ -16,6 +16,8 @@ This document explains the fork-specific changes on `main` that diverge from ups
 | **P-009** | `hermes_cli/web_server.py`, `tui_gateway/sse.py` | Adds SSE+POST gateway transport at `/api/v2/events` and `/api/v2/rpc` | desktop-v2 uses EventSource for streaming and POST for JSON-RPC to avoid WebSocket edge cases in packaged desktop runtimes | Maybe upstream |
 | **P-010** | `hermes_cli/config.py` | Registers `LONGCAT_API_KEY` in `OPTIONAL_ENV_VARS` | CN model settings need first-class LongCat credentials in the env panel | Won't be upstreamed unless upstream adopts LongCat |
 | **P-011** | `tui_gateway/server.py` | Adds `slug_filter` to `model.options` and `provider.probe` RPC | desktop-v2 needs filtered model picker options and a lightweight provider health probe | Maybe upstream |
+| **P-012** | `hermes_cli/main.py` | `_model_flow_anthropic()` prompts for optional custom `base_url` instead of unconditionally removing it | Users running Anthropic-compatible proxies or alternative endpoints need to preserve a custom `base_url` during model setup | Should be upstreamed |
+| **P-013** | `model_tools.py`, `tests/run_agent/test_repair_tool_arg_keys.py` | Adds automatic tool argument key repair (`repair_tool_arg_keys`) with alias tables, per-tool overrides, fuzzy fallback, nested object/array recursion, and an optional callback hook; integrated into `handle_function_call` before type coercion | LLMs often misname arguments (e.g. "file"→"path", "cmd"→"command"); this makes tool dispatch resilient to common drift without weakening JSON Schemas | Should be upstreamed |
 
 > **P-001** (provider dict-vs-list mismatch in `tui_gateway/server.py`) — **dropped from this fork**. Upstream has since fixed it; the line `user_provs = cfg.get("providers")` in `_apply_model_switch` already does the right thing.
 
@@ -202,5 +204,108 @@ there was no small JSON-RPC method for provider probing.
 **Side effects**: Minimal. The new RPC should avoid returning secrets or
 raw provider config.
 
-**Should we upstream?** Maybe. The probe shape should be reviewed before
+**Should we upstream?** Maybe, but the probe shape should be reviewed before
 opening an upstream PR.
+
+---
+
+### P-012: Optional custom `base_url` in `_model_flow_anthropic()`
+
+**Symptom**: When adding an Anthropic model through the interactive setup flow, any pre-configured or desired custom `base_url` is silently discarded because the code unconditionally calls `model.pop("base_url", None)`.
+
+**Root cause**: `_model_flow_anthropic()` hardcoded `model.pop("base_url", None)` with the assumption that all Anthropic traffic should go to the official `https://api.anthropic.com` endpoint. This breaks users who need to point at Anthropic-compatible proxies, OpenRouter, or private endpoints.
+
+**What the patch does**:
+- Removes the unconditional `model.pop("base_url", None)`.
+- After model selection, prompts the user with the current `base_url` (or `https://api.anthropic.com` as the default).
+- If the user types a custom URL, it is saved to `model["base_url"]`.
+- If the user presses Enter without input, the existing `base_url` is kept; only when none existed before is it popped so the runtime falls back to the hardcoded Anthropic URL.
+
+**Side effects**: None. The runtime (`runtime_provider.py`) already reads `model_cfg.get("base_url")` for the `anthropic` provider, so no runtime changes are required.
+
+**Should we upstream?** Yes. The change is backward-compatible and enables legitimate use cases for alternative Anthropic-compatible endpoints.
+
+---
+
+### P-013: Automatic tool argument key repair in `handle_function_call`
+
+**Symptom**: LLM tool calls frequently fail with "unknown parameter" because the model uses synonyms or typos for argument names (e.g. `file` instead of `path`, `cmd` instead of `command`, `backgroud` instead of `background`).
+
+**Root cause**: Hermes' JSON Schemas are strict. When an LLM drifts from the canonical field name, `handle_function_call` passes the bad key straight through to the tool handler, which often rejects it.
+
+**What the patch does**:
+- Introduces `repair_tool_arg_keys()` and `_repair_nested_args()` in `model_tools.py`.
+- Defines `TOOL_FIELD_ALIASES` — a large global alias table covering general, file, shell, web, task, todo, input, search, memory, cronjob, and skill argument names.
+- Defines `TOOL_SPECIFIC_ALIASES` for per-tool overrides (e.g. `delegate_task` maps `task`→`goal` instead of `task`→`prompt`; `cronjob` maps `command`→`action`).
+- Uses `difflib.get_close_matches` as a fuzzy fallback for typos when no alias matches.
+- Recursively repairs keys inside nested objects and arrays of objects, guided by the schema's `properties` and `items` definitions.
+- Adds an optional callback hook (`set_arg_repair_callback`) so external systems (TUI, ACP) can be notified of top-level key repairs.
+- Hooks the repair into `handle_function_call()` so it runs *before* `coerce_tool_args()`, meaning repaired keys are still type-coerced as usual.
+- Ships comprehensive tests in `tests/run_agent/test_repair_tool_arg_keys.py`.
+
+**Side effects**: Minimal. The function is a pure key-mapping transform; unknown keys are left untouched. The fuzzy matcher only kicks in for keys ≥4 chars with a similarity ratio ≥0.75–0.80, so random fields are unlikely to be falsely renamed.
+
+**Should we upstream?** Yes. This is a generic robustness improvement that benefits every Hermes deployment regardless of platform or provider.
+
+---
+
+## Windows compatibility patches
+
+These patches improve first-class Windows support. They are authored by Maxwell Geng and are candidates for upstreaming.
+
+### `282cfeeca` — Add `posix` option for `shlex.split` (Windows compatible)
+
+**What it does**: Passes `posix=os.name == "posix"` to every `shlex.split()` call about `subprocess` usage in the codebase so that backslashes in Windows paths are not misinterpreted as escape characters.
+
+**Files touched**:
+- `agent/copilot_acp_client.py`
+- `agent/shell_hooks.py`
+- `agent/subdirectory_hints.py`
+- `cli.py`
+- `gateway/run.py`
+- `hermes_cli/auth.py`
+- `hermes_cli/gateway_windows.py`
+- `hermes_cli/memory_setup.py`
+- `tools/transcription_tools.py`
+
+**Upstream status**: Should be upstreamed — pure bug-fix for Windows, no behavior change on POSIX.
+
+### `ada59ec36` — Fix 10 Windows-failing tests to be cross-platform
+
+**What it does**: Makes 10 test cases pass (or skip gracefully) on Windows:
+
+| Test | Fix |
+|---|---|
+| `test_make_run_env_appends_homebrew_on_minimal_path` | Skip on Windows (POSIX PATH injection is intentionally skipped there). |
+| `test_returns_root_when_only_root_exists` | `os.path.normpath()` the cwd on Windows so forward-slash paths walk up to the filesystem root correctly. |
+| `test_close_stdin_allows_eof_driven_process_to_finish` | Use `cat` instead of `python3`; skip when PTY library is missing; pass `str` to winpty and `bytes` to ptyprocess. |
+| `test_popen_killed_when_thread_creation_fails` | Only patch `os.getpgid` when it exists (POSIX-only). |
+| `test_popen_killed_when_write_checkpoint_fails` | Only patch `os.getpgid` when it exists (POSIX-only). |
+| `test_kill_detached_session_uses_host_pid` | Mock `_terminate_host_pid` directly instead of internal `psutil` calls. |
+| `test_windows_does_not_call_psutil` | Add `pytest.importorskip("psutil")`. |
+| `test_posix_walks_tree_and_terminates_children_then_parent` | Add `pytest.importorskip("psutil")`. |
+| `test_posix_no_such_process_swallowed` | Add `pytest.importorskip("psutil")`. |
+| `test_posix_oserror_falls_back_to_os_kill` | Add `pytest.importorskip("psutil")`. |
+
+**Files touched**:
+- `tests/tools/test_local_env_blocklist.py`
+- `tests/tools/test_process_registry.py`
+- `tools/environments/local.py`
+- `tools/process_registry.py`
+
+**Upstream status**: Should be upstreamed — expands CI coverage to Windows without changing production behavior.
+
+### `1a75a7672` — Auto-install Git-Bash on Windows, transform Windows-style commands to POSIX for bash
+
+**What it does**:
+1. **Auto-install Git for Windows** when the local terminal backend can't find a usable `bash.exe`. Tries, in order: Chocolatey, Scoop, PortableGit self-extracting archive, official Git installer silent setup. Adds the install directory to the user's PATH registry entry.
+2. **Transforms Windows-style shell commands to POSIX style** before sending them to bash. Handles drive-letter paths (`C:\foo` → `/c/foo`), backslash directory separators, Windows-specific quoting/escaping, and common Windows-only idioms.
+
+**New files**:
+- `tools/environments/_install_git.py` — Download & install strategies for Git on Windows.
+- `tools/environments/_process_bash_command.py` — Windows-to-POSIX command translation.
+
+**Files touched**:
+- `tools/environments/local.py` — Integrates auto-install and command transformation into the local environment backend.
+
+**Upstream status**: Should be upstreamed — makes the terminal toolset work out-of-the-box on Windows without requiring manual Git installation.

@@ -147,7 +147,7 @@ def _current_profile_cli_args() -> list[str]:
     from hermes_cli.gateway import _profile_arg
 
     profile_arg = _profile_arg()
-    return shlex.split(profile_arg) if profile_arg else []
+    return shlex.split(profile_arg, posix=False) if profile_arg else []
 
 
 def _launch_elevated_gateway_command(command: str, extra_args: list[str] | None = None) -> bool:

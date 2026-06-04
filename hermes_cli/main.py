@@ -6099,17 +6099,29 @@ def _model_flow_anthropic(config, current_model=""):
     if selected:
         _save_model_choice(selected)
 
-        # Update config with provider — clear base_url since
-        # resolve_runtime_provider() always hardcodes Anthropic's URL.
-        # Leaving a stale base_url in config can contaminate other
-        # providers if the user switches without running 'hermes model'.
         cfg = load_config()
         model = cfg.get("model")
         if not isinstance(model, dict):
             model = {"default": model} if model else {}
             cfg["model"] = model
         model["provider"] = "anthropic"
-        model.pop("base_url", None)
+
+        # Optional custom base_url
+        current_base_url = model.get("base_url", "")
+        print()
+        prompt = f"Custom base URL [{current_base_url or 'https://api.anthropic.com'}]: "
+        try:
+            custom_url = input(prompt).strip().rstrip("/")
+        except (KeyboardInterrupt, EOFError):
+            custom_url = ""
+        if custom_url:
+            model["base_url"] = custom_url
+        else:
+            # User hit Enter with no input — keep existing if present,
+            # otherwise clear stale value so it falls back to the default.
+            if not current_base_url:
+                model.pop("base_url", None)
+
         save_config(cfg)
         deactivate_provider()
 

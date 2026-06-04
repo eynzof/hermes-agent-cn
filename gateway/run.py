@@ -2915,7 +2915,7 @@ class GatewayRunner:
         if not text:
             return "", False
         try:
-            tokens = shlex.split(text)
+            tokens = shlex.split(text, posix=os.name == "posix")
         except ValueError:
             tokens = text.split()
 
@@ -9827,7 +9827,7 @@ class GatewayRunner:
         if text.startswith("kanban"):
             text = text[len("kanban"):].lstrip()
 
-        tokens = shlex.split(text) if text else []
+        tokens = shlex.split(text, posix=os.name == "posix") if text else []
         requested_board = None
         action = None
         i = 0

@@ -9,7 +9,9 @@ See: https://github.com/NousResearch/hermes-agent/issues/1264
 """
 
 import os
+import sys
 import threading
+import pytest
 from unittest.mock import MagicMock, patch
 
 from tools.environments.local import (
@@ -385,6 +387,10 @@ class TestSanePathIncludesHomebrew:
         from tools.environments.local import _SANE_PATH
         assert "/opt/homebrew/sbin" in _SANE_PATH
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="POSIX-only: PATH injection is skipped on Windows",
+    )
     def test_make_run_env_appends_homebrew_on_minimal_path(self):
         """When PATH is minimal (no /usr/bin), _make_run_env should append
         _SANE_PATH which now includes Homebrew dirs."""
