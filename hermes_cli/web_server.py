@@ -6632,10 +6632,15 @@ async def get_active_profile_endpoint():
         current = profiles_mod.get_active_profile_name() or "default"
     except Exception:
         current = "default"
-    return {"active": active, "current": current}
+    # `name` mirrors `active` for the hermes-agent-cn desktop client, whose
+    # profile switcher (web/src/hooks/use-profiles.ts) reads `.name` from this
+    # endpoint. Fork compat (P-008) layered on upstream's endpoint after upstream
+    # shipped its own /api/profiles/active.
+    return {"name": active, "active": active, "current": current}
 
 
 @app.post("/api/profiles/active")
+@app.put("/api/profiles/active")  # PUT alias: hermes-agent-cn desktop sets via PUT (fork P-008)
 async def set_active_profile_endpoint(body: ProfileActiveUpdate):
     """Set the sticky active profile (mirrors ``hermes profile use``).
 
@@ -6766,47 +6771,6 @@ async def update_profile_soul(name: str, body: ProfileSoulUpdate):
     except OSError as e:
         _log.exception("PUT /api/profiles/%s/soul failed", name)
         raise HTTPException(status_code=500, detail=f"Could not write SOUL.md: {e}")
-    return {"ok": True}
-
-
-# P-008: downstream-only — fills the gap that upstream's profile API leaves.
-# Upstream has GET/POST /api/profiles, PATCH/DELETE /api/profiles/{name},
-# and SOUL endpoints, but no way to read or write the *sticky active profile*
-# (the value of ~/.hermes/active_profile that decides which profile the
-# next `hermes` invocation will use). v2 Web UI's profile switcher needs
-# both endpoints to drive the "set active + prompt user to restart hermes"
-# UX flow described in v2/docs/p0-adoptions/01-profile-switching.md.
-# See v2/UPSTREAM_PATCHES.md.
-
-class ActiveProfileSet(BaseModel):
-    name: str
-
-
-@app.get("/api/profiles/active")
-async def get_active_profile_endpoint():
-    """Return the sticky active profile name. P-008.
-
-    This is the profile used on the *next* hermes start. The currently
-    running dashboard process is locked to whatever profile it was
-    started with — clients must instruct the user to restart hermes
-    after a PUT to make the switch take effect.
-    """
-    from hermes_cli import profiles as profiles_mod
-    return {"name": profiles_mod.get_active_profile()}
-
-
-@app.put("/api/profiles/active")
-async def set_active_profile_endpoint(body: ActiveProfileSet):
-    """Write the sticky active profile name to ~/.hermes/active_profile. P-008.
-
-    Does NOT affect the currently running dashboard process. Client must
-    restart hermes (or, on desktop shell, restart the spawned subprocess).
-    """
-    from hermes_cli import profiles as profiles_mod
-    try:
-        profiles_mod.set_active_profile(body.name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}
 
 
@@ -6977,7 +6941,7 @@ async def get_toolsets():
 
 
 @app.get("/api/mcp-servers")
-async def list_mcp_servers():
+async def list_mcp_servers_summary():
     """List configured MCP servers from config.yaml.
 
     P-005: this endpoint is downstream-only — never made it to upstream.
