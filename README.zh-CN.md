@@ -6,7 +6,7 @@
 [![Runtime Release](https://github.com/Eynzof/hermes-agent-cn/actions/workflows/release-runtime.yml/badge.svg)](https://github.com/Eynzof/hermes-agent-cn/actions/workflows/release-runtime.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
-`hermes-agent-cn` 是 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 的中文社区 fork。这个仓库持续跟踪上游，同时维护一组小而明确的补丁，用于中文模型服务商元数据、Hermes 桌面端 runtime，以及 [hermes-cn-desktop-v2](https://github.com/Eynzof/hermes-cn-desktop-v2) 依赖的 Dashboard API。
+`hermes-agent-cn` 是 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 的中文社区 fork。这个仓库持续跟踪上游，同时维护一组小而明确的补丁，用于中文模型服务商元数据、Hermes 桌面端 runtime，以及 [hermes-agent-cn-desktop](https://github.com/Eynzof/hermes-agent-cn-desktop) 依赖的 Dashboard API。
 
 这个项目不是对 Hermes Agent 的重新实现，而是一个长期维护的下游 fork。我们保留上游归属、上游许可证和清晰的上游同步流程。
 
@@ -17,14 +17,14 @@
 - **中文模型服务商元数据**：让 Dashboard 环境变量面板识别 ARK、千帆、混元、SiliconFlow、ModelScope、AI302、CompShare、LongCat 等配置项。
 - **桌面端依赖的 Dashboard API**：包括附件上传、workspace 目录浏览、MCP server 摘要、active profile 读写等接口。
 - **SSE + POST gateway transport**：为浏览器和桌面壳提供 EventSource + HTTP JSON-RPC 传输，减少对 WebSocket-only 模式的依赖。
-- **桌面 runtime 发布链路**：构建签名后的 PyInstaller runtime artifact，供 `hermes-cn-desktop-v2` 下载和验证。
+- **桌面 runtime 发布链路**：构建签名后的 PyInstaller runtime artifact，供 `hermes-agent-cn-desktop` 下载和验证。
 - **fork 维护自动化**：包括 upstream watch、runtime release、lockfile 检查和供应链扫描。
 
 如果你需要官方上游项目，请使用 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)。如果你需要中文社区 fork，或需要 Hermes Agent CN Desktop 使用的 runtime，请使用本仓库。
 
 ## 和桌面端的关系
 
-`hermes-agent-cn` 是 [Hermes Agent CN Desktop](https://github.com/Eynzof/hermes-cn-desktop-v2) 使用的 runtime 和 Dashboard 后端。桌面端会从本仓库的 GitHub Releases 下载签名 runtime，并在本机运行 Dashboard。
+`hermes-agent-cn` 是 [Hermes Agent CN Desktop](https://github.com/Eynzof/hermes-agent-cn-desktop) 使用的 runtime 和 Dashboard 后端。桌面端会从本仓库的 GitHub Releases 下载签名 runtime，并在本机运行 Dashboard。
 
 当前 runtime release：
 
@@ -60,7 +60,7 @@ iex (irm https://raw.githubusercontent.com/Eynzof/hermes-agent-cn/main/scripts/i
 hermes
 ```
 
-如果你是桌面端用户，更推荐直接从 [hermes-cn-desktop-v2 Releases](https://github.com/Eynzof/hermes-cn-desktop-v2/releases) 安装桌面客户端，由桌面端自动管理 runtime。
+如果你是桌面端用户，更推荐直接从 [hermes-agent-cn-desktop Releases](https://github.com/Eynzof/hermes-agent-cn-desktop/releases) 安装桌面客户端，由桌面端自动管理 runtime。
 
 ## 快速开始
 

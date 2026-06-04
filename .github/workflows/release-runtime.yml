@@ -1,5 +1,5 @@
 # Build, sign, and publish hermes-agent-cn runtime artifacts that the
-# hermes-cn-desktop-v2 client downloads on first launch.
+# hermes-agent-cn-desktop client downloads on first launch.
 #
 # Trigger: push a tag matching `runtime-v*-cn.*` (e.g. `runtime-v0.14.0-cn.1`).
 # Per-platform jobs build a self-contained executable via PyInstaller,

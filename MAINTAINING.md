@@ -3,7 +3,7 @@
 Simplified Chinese: [`MAINTAINING.zh-CN.md`](./MAINTAINING.zh-CN.md)
 
 This repository is a long-lived downstream fork of
-`NousResearch/hermes-agent`. The fork exists so `hermes-cn-desktop-v2`
+`NousResearch/hermes-agent`. The fork exists so `hermes-agent-cn-desktop`
 can depend on a stable, signed `hermes-agent-cn` runtime while we still
 sync official upstream changes regularly.
 
@@ -15,10 +15,10 @@ upstream/main     official NousResearch source, read-only
 chore/sync-*      temporary upstream sync branches
 cn/P-xxx-*        fork-only patch branches
 upstream-pr/*     clean branches based on upstream/main for official PRs
-runtime-v*        signed runtime release tags for desktop-v2
+runtime-v*        signed runtime release tags for desktop
 ```
 
-`desktop-v2` must consume runtime releases cut from verified
+`desktop` must consume runtime releases cut from verified
 `origin/main`. It should not depend on a moving branch head or on a
 user's globally installed upstream `hermes` package.
 
@@ -88,7 +88,7 @@ curl -sS -H "$HEADER" http://127.0.0.1:9119/api/profiles/active | jq
 curl -sS -H "$HEADER" http://127.0.0.1:9119/api/fs/list | jq
 curl -sS http://127.0.0.1:9119/openapi.json | jq '.paths | has("/api/v2/events") and has("/api/v2/rpc")'
 
-# Exercise /api/upload through desktop-v2 or the web composer when possible.
+# Exercise /api/upload through desktop or the web composer when possible.
 # Exercise provider.probe and model.options slug_filter when touching gateway code.
 
 kill %1
@@ -128,7 +128,7 @@ fork implementation in the sync branch and update `FORK_NOTES.md`.
 
 ## Runtime Releases
 
-Runtime releases are signed artifacts consumed by `hermes-cn-desktop-v2`.
+Runtime releases are signed artifacts consumed by `hermes-agent-cn-desktop`.
 Cut them only from a verified `main` commit:
 
 ```bash
@@ -149,7 +149,7 @@ schema and key-rotation process.
 - Do not rebase published `main`.
 - Do not squash unrelated fork patches together.
 - Do not tag `runtime-v*` from an unreviewed sync branch.
-- Do not let desktop-v2 depend on a user's global upstream `hermes`.
+- Do not let desktop depend on a user's global upstream `hermes`.
 - Do not expose MCP command, args, or env values through public API
   responses.
 
@@ -157,6 +157,6 @@ schema and key-rotation process.
 
 - Upstream: https://github.com/NousResearch/hermes-agent
 - Fork: https://github.com/Eynzof/hermes-agent-cn
-- Desktop consumer: https://github.com/Eynzof/hermes-cn-desktop-v2
+- Desktop consumer: https://github.com/Eynzof/hermes-agent-cn-desktop
 - Runtime release docs: `docs/RUNTIME_RELEASES.md`
 - Fork patch notes: `FORK_NOTES.md`

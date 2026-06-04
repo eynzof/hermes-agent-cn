@@ -1,6 +1,6 @@
 # Runtime release pipeline
 
-The hermes-cn-desktop-v2 client (Tauri desktop app) downloads a
+The hermes-agent-cn-desktop client (Tauri desktop app) downloads a
 hermes-agent-cn runtime on first launch and uses it to spawn the
 dashboard subprocess. This document describes how that runtime is built,
 signed, and published.
@@ -83,7 +83,7 @@ If you need to rotate, generate a new pair, swap both:
 
 * GitHub secret `RUNTIME_SIGN_PRIVATE_KEY_PEM` in this repo
 * Build env `HERMES_RUNTIME_UPDATE_PUBLIC_KEY_PEM_DEFAULT` in the
-  hermes-cn-desktop-v2 release workflow
+  hermes-agent-cn-desktop release workflow
 
 macOS runtime releases also require the same Apple Developer ID signing
 secrets used by the desktop release workflow:
@@ -116,7 +116,7 @@ the old key and will reject anything signed by the new one.
 5. The aggregate `release` job downloads all artifacts and publishes
    them to a GitHub Release named `runtime-v0.14.0-cn.1`.
 
-Once the release exists, every hermes-cn-desktop-v2 install whose
+Once the release exists, every hermes-agent-cn-desktop install whose
 manifest URL points at this base URL will pick up the update on next
 launch (or via the in-app "check for updates" flow).
 

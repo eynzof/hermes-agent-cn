@@ -2,7 +2,7 @@
 
 英文版：[`MAINTAINING.md`](./MAINTAINING.md)
 
-`hermes-agent-cn` 是 `NousResearch/hermes-agent` 的长期 downstream fork。这个 fork 的目标是让 `hermes-cn-desktop-v2` 依赖一个稳定、可签名发布、可定期同步上游的 `hermes-agent-cn` runtime，而不是依赖用户机器上全局安装的官方 `hermes`。
+`hermes-agent-cn` 是 `NousResearch/hermes-agent` 的长期 downstream fork。这个 fork 的目标是让 `hermes-agent-cn-desktop` 依赖一个稳定、可签名发布、可定期同步上游的 `hermes-agent-cn` runtime，而不是依赖用户机器上全局安装的官方 `hermes`。
 
 ## 分支模型
 
@@ -12,10 +12,10 @@ upstream/main     官方上游，只读
 chore/sync-*      临时上游同步分支
 cn/P-xxx-*        fork 专属补丁分支
 upstream-pr/*     基于 upstream/main 的干净上游 PR 分支
-runtime-v*        desktop-v2 使用的签名 runtime release tag
+runtime-v*        desktop 使用的签名 runtime release tag
 ```
 
-`desktop-v2` 只能消费从已验证 `origin/main` 切出的 runtime release。不要让 desktop-v2 依赖移动中的分支头，也不要依赖用户全局安装的上游 `hermes`。
+`desktop` 只能消费从已验证 `origin/main` 切出的 runtime release。不要让 desktop 依赖移动中的分支头，也不要依赖用户全局安装的上游 `hermes`。
 
 ## remote 布局
 
@@ -84,7 +84,7 @@ curl -sS -H "$HEADER" http://127.0.0.1:9119/api/profiles/active | jq
 curl -sS -H "$HEADER" http://127.0.0.1:9119/api/fs/list | jq
 curl -sS http://127.0.0.1:9119/openapi.json | jq '.paths | has("/api/v2/events") and has("/api/v2/rpc")'
 
-# /api/upload 尽量通过 desktop-v2 或 web composer 实测。
+# /api/upload 尽量通过 desktop 或 web composer 实测。
 # 如果改到 gateway 相关代码，也要覆盖 provider.probe 和 model.options slug_filter。
 
 kill %1
@@ -123,7 +123,7 @@ git log --oneline upstream/main..main -- <conflicted-file>
 
 ## Runtime 发布
 
-runtime release 是 `hermes-cn-desktop-v2` 首次启动和升级时下载的签名产物。只从验证过的 `main` 打 tag：
+runtime release 是 `hermes-agent-cn-desktop` 首次启动和升级时下载的签名产物。只从验证过的 `main` 打 tag：
 
 ```bash
 git switch main
@@ -140,13 +140,13 @@ git push origin runtime-v0.14.0-cn.1
 - 不要 rebase 已发布的 `main`。
 - 不要把不相关的 fork 补丁 squash 到一起。
 - 不要从未审阅的同步分支打 `runtime-v*` tag。
-- 不要让 desktop-v2 依赖用户全局安装的上游 `hermes`。
+- 不要让 desktop 依赖用户全局安装的上游 `hermes`。
 - 不要在公开 API 响应中暴露 MCP `command`、`args`、`env`。
 
 ## 参考
 
 - Upstream: https://github.com/NousResearch/hermes-agent
 - Fork: https://github.com/Eynzof/hermes-agent-cn
-- Desktop consumer: https://github.com/Eynzof/hermes-cn-desktop-v2
+- Desktop consumer: https://github.com/Eynzof/hermes-agent-cn-desktop
 - Runtime release docs: `docs/RUNTIME_RELEASES.md`
 - Fork patch notes: `FORK_NOTES.md`

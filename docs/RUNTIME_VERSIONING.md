@@ -91,7 +91,7 @@ sourceCommit
 
 Any change to that order must be made in both
 `scripts/sign_runtime_manifest.py` and
-`hermes-cn-desktop-v2/src/process/runtime.rs` in the same change.
+`hermes-agent-cn-desktop/src/process/runtime.rs` in the same change.
 
 ## Cutting a runtime release
 

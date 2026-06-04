@@ -9,16 +9,16 @@
 | ID | 目标文件 | 做了什么 | 为什么需要 | 上游状态 |
 |---|---|---|---|---|
 | **P-001** | `tui_gateway/server.py` | provider 配置 dict/list 不一致修复 | 早期 fork 需要兼容用户配置形态 | 已由上游修复，本 fork 不再携带 |
-| **P-002** | `hermes_cli/web_server.py` | 增加 `POST /api/upload` 附件上传接口 | desktop-v2 / web composer 拖拽上传依赖它 | 未进入上游 |
-| **P-003** | `hermes_cli/web_server.py` | 去掉 `/api/ws` 的 `_DASHBOARD_EMBEDDED_CHAT_ENABLED` 门禁 | desktop-v2 以 headless dashboard 方式运行，不带 `--tui` 时仍需要 gateway WS | 未进入上游 |
+| **P-002** | `hermes_cli/web_server.py` | 增加 `POST /api/upload` 附件上传接口 | desktop / web composer 拖拽上传依赖它 | 未进入上游 |
+| **P-003** | `hermes_cli/web_server.py` | 去掉 `/api/ws` 的 `_DASHBOARD_EMBEDDED_CHAT_ENABLED` 门禁 | desktop 以 headless dashboard 方式运行，不带 `--tui` 时仍需要 gateway WS | 未进入上游 |
 | **P-004** | `hermes_cli/web_server.py` | 增加 `GET /api/fs/list` 文件夹浏览接口 | web 工作区选择器需要列目录，避免让用户手输路径 | 未进入上游 |
-| **P-005** | `hermes_cli/web_server.py` | 增加 `GET /api/mcp-servers` 只读 MCP 列表 | desktop-v2 健康检查需要 MCP 数量，但不能泄露 command/args/env | 可考虑上游 |
+| **P-005** | `hermes_cli/web_server.py` | 增加 `GET /api/mcp-servers` 只读 MCP 列表 | desktop 健康检查需要 MCP 数量，但不能泄露 command/args/env | 可考虑上游 |
 | **P-006** | `hermes_cli/config.py` | 为 CN provider 注册 `OPTIONAL_ENV_VARS` | 模型设置页需要展示 ARK、QIANFAN、HUNYUAN、SiliconFlow 等密钥项 | CN 专属，通常不向上游提交 |
 | **P-007** | `tui_gateway/ws.py` | 捕获并记录 gateway dispatch 异常，返回 JSON-RPC error | 否则前端只看到 WebSocket closed，缺少诊断信息 | 建议上游 |
-| **P-008** | `hermes_cli/web_server.py` | 增加 `GET/PUT /api/profiles/active` | desktop-v2 profile 切换器需要读写 sticky active profile | 建议上游 |
-| **P-009** | `hermes_cli/web_server.py`, `tui_gateway/sse.py` | 增加 `/api/v2/events` SSE 和 `/api/v2/rpc` POST transport | desktop-v2 默认使用 EventSource + POST，减少 WebSocket 兼容问题 | 可考虑上游 |
+| **P-008** | `hermes_cli/web_server.py` | 增加 `GET/PUT /api/profiles/active` | desktop profile 切换器需要读写 sticky active profile | 建议上游 |
+| **P-009** | `hermes_cli/web_server.py`, `tui_gateway/sse.py` | 增加 `/api/v2/events` SSE 和 `/api/v2/rpc` POST transport | desktop 默认使用 EventSource + POST，减少 WebSocket 兼容问题 | 可考虑上游 |
 | **P-010** | `hermes_cli/config.py` | 注册 `LONGCAT_API_KEY` | CN 模型设置需要 LongCat 密钥入口 | CN 专属，除非上游支持 LongCat |
-| **P-011** | `tui_gateway/server.py` | 给 `model.options` 增加 `slug_filter`，并增加 `provider.probe` RPC | desktop-v2 需要过滤模型选择器，并轻量探测 provider 状态 | 可考虑上游 |
+| **P-011** | `tui_gateway/server.py` | 给 `model.options` 增加 `slug_filter`，并增加 `provider.probe` RPC | desktop 需要过滤模型选择器，并轻量探测 provider 状态 | 可考虑上游 |
 | **P-012** | `hermes_cli/main.py` | `_model_flow_anthropic()` 支持保留或自定义 `base_url`，不再无条件删除 | 使用 Anthropic 兼容代理或私有端点的用户需要在模型设置流程中保留自定义 `base_url` | 建议上游 |
 | **P-013** | `model_tools.py`, `tests/run_agent/test_repair_tool_arg_keys.py` | 在 `handle_function_call` 中增加自动参数键修复：全局别名表、工具级覆盖、模糊匹配、嵌套对象/数组递归修复，以及可选回调通知 | LLM 经常把参数名写错（如 `file`→`path`、`cmd`→`command`），此前会直接报 "unknown parameter"；该补丁在不放宽 JSON Schema 的前提下提高工具调用的容错率 | 建议上游 |
 
@@ -29,7 +29,7 @@
 | 范围 | 目标文件 | 做了什么 |
 |---|---|---|
 | 上游同步 | `scripts/sync-upstream.sh`, `.github/workflows/upstream-watch.yml`, `MAINTAINING.md` | 固化“临时同步分支 + PR 回 main”的同步流程，避免直接在 `main` 合上游 |
-| managed runtime | `.github/workflows/release-runtime.yml`, `scripts/sign_runtime_manifest.py`, `docs/RUNTIME_RELEASES.md` | 构建 PyInstaller runtime，签名 manifest，并发布给 desktop-v2 下载 |
+| managed runtime | `.github/workflows/release-runtime.yml`, `scripts/sign_runtime_manifest.py`, `docs/RUNTIME_RELEASES.md` | 构建 PyInstaller runtime，签名 manifest，并发布给 desktop 下载 |
 
 ## 补丁详情
 
@@ -41,9 +41,9 @@
 
 ### P-002：`POST /api/upload`
 
-**现象**：desktop-v2 或 web composer 拖拽上传文件时，请求 `/api/upload` 返回 404。
+**现象**：desktop 或 web composer 拖拽上传文件时，请求 `/api/upload` 返回 404。
 
-**原因**：上游曾经加入过 dashboard 附件上传接口，后来又移除；desktop-v2 仍需要这个能力。
+**原因**：上游曾经加入过 dashboard 附件上传接口，后来又移除；desktop 仍需要这个能力。
 
 **改动**：增加 FastAPI handler，接收 multipart `file` 和 `session_id`，写入 `~/.hermes/sessions/<id>/attachments/`，返回 `{ok, filename, path, size, mime_type}`。文件名冲突复用上游 `_next_unique_path`。
 
@@ -59,9 +59,9 @@
 
 ### P-003：去掉 `/api/ws` 的 embedded TUI 门禁
 
-**现象**：desktop-v2 运行 `hermes dashboard --no-open` 时，`/api/ws` upgrade 会被关闭，聊天不可用。
+**现象**：desktop 运行 `hermes dashboard --no-open` 时，`/api/ws` upgrade 会被关闭，聊天不可用。
 
-**原因**：上游的 `_DASHBOARD_EMBEDDED_CHAT_ENABLED` 只在 `hermes dashboard --tui` 模式下打开。desktop-v2 是 headless dashboard + 独立 UI，不会启用这个标志。
+**原因**：上游的 `_DASHBOARD_EMBEDDED_CHAT_ENABLED` 只在 `hermes dashboard --tui` 模式下打开。desktop 是 headless dashboard + 独立 UI，不会启用这个标志。
 
 **改动**：移除 `/api/ws` 对 `_DASHBOARD_EMBEDDED_CHAT_ENABLED` 的检查。接口仍受 session token 和 loopback host 约束。
 
@@ -94,7 +94,7 @@
 
 ### P-005：`GET /api/mcp-servers`
 
-**现象**：desktop-v2 健康检查需要知道 MCP server 总数和启用数，但不应读取完整 MCP 配置。
+**现象**：desktop 健康检查需要知道 MCP server 总数和启用数，但不应读取完整 MCP 配置。
 
 **原因**：MCP 配置中的 `command`、`args`、`env` 可能包含敏感信息。上游没有只读摘要接口。
 
@@ -108,7 +108,7 @@
 
 ### P-006：CN provider 的 `OPTIONAL_ENV_VARS`
 
-**现象**：desktop-v2 模型设置页列出 CN provider，但 env 面板没有对应 `*_API_KEY` 输入项。
+**现象**：desktop 模型设置页列出 CN provider，但 env 面板没有对应 `*_API_KEY` 输入项。
 
 **原因**：上游 metadata 主要覆盖 OpenAI、Anthropic、Google、DeepSeek 等全球 provider。
 
@@ -140,7 +140,7 @@
 
 ### P-008：`GET/PUT /api/profiles/active`
 
-**现象**：desktop-v2 profile 切换器需要读取和设置 sticky active profile。
+**现象**：desktop profile 切换器需要读取和设置 sticky active profile。
 
 **原因**：上游有 profile 列表、创建、删除、重命名、SOUL 读写，但没有对 `~/.hermes/active_profile` 的 HTTP getter/setter。
 
@@ -148,7 +148,7 @@
 - `GET /api/profiles/active` 返回 `{name}`，文件不存在时返回 `default`。
 - `PUT /api/profiles/active` 接收 `{name}` 并写入 sticky 设置。
 
-**风险和约束**：该接口只影响下次启动默认 profile，不改变当前 dashboard 进程正在使用的 `HERMES_HOME`。desktop-v2 需要提示用户重启。
+**风险和约束**：该接口只影响下次启动默认 profile，不改变当前 dashboard 进程正在使用的 `HERMES_HOME`。desktop 需要提示用户重启。
 
 **是否上游**：建议上游，属于明显的 API 对称性缺口。
 
@@ -156,9 +156,9 @@
 
 ### P-009：SSE+POST gateway transport
 
-**现象**：desktop-v2 需要稳定、浏览器友好的流式 transport。只依赖 `/api/ws` 时，桌面壳和网络环境下的故障更难诊断。
+**现象**：desktop 需要稳定、浏览器友好的流式 transport。只依赖 `/api/ws` 时，桌面壳和网络环境下的故障更难诊断。
 
-**原因**：上游 gateway 主要通过 WebSocket 暴露。desktop-v2 希望服务端到客户端走 EventSource，客户端到服务端走普通 HTTP POST。
+**原因**：上游 gateway 主要通过 WebSocket 暴露。desktop 希望服务端到客户端走 EventSource，客户端到服务端走普通 HTTP POST。
 
 **改动**：
 - 增加 `GET /api/v2/events` 推送 SSE frame。
@@ -187,7 +187,7 @@
 
 ### P-011：模型过滤和 provider probe
 
-**现象**：desktop-v2 需要按 provider slug 过滤模型选择器，并在不启动完整 agent turn 的情况下轻量探测 provider。
+**现象**：desktop 需要按 provider slug 过滤模型选择器，并在不启动完整 agent turn 的情况下轻量探测 provider。
 
 **原因**：上游 `model.options` 返回较宽泛的选项；没有专用的 provider 探测 RPC。
 

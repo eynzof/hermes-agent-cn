@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""Sign a hermes-agent-cn runtime manifest with Ed25519.
 
-The hermes-cn-desktop-v2 client verifies the signature against the public key
+The hermes-agent-cn-desktop client verifies the signature against the public key
 it was built with. The canonical payload concatenated with ``\n`` matches what
 the Rust side reconstructs in ``signature_payload()`` — keep the field order in
 sync.
@@ -53,7 +53,7 @@ except ImportError:
 SCHEMA_VERSION = 2
 
 # Field order MUST match `signature_payload()` in
-# hermes-cn-desktop-v2/src/process/runtime.rs. Any reorder here is a
+# hermes-agent-cn-desktop/src/process/runtime.rs. Any reorder here is a
 # silent verification failure on every desktop install — change both
 # sides together or not at all.
 _PAYLOAD_FIELDS = (
