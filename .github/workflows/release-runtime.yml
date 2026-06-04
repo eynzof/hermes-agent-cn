@@ -57,6 +57,13 @@ jobs:
             platform: darwin
             arch: arm64
             ext: ""
+          # Intel macs: macos-latest is Apple Silicon (arm64) now, so x86_64
+          # needs the macos-13 runner (the last Intel image). Produces
+          # hermes-agent-cn-runtime-darwin-x64 for Intel Mac desktop clients.
+          - runner: macos-13
+            platform: darwin
+            arch: x64
+            ext: ""
           - runner: ubuntu-latest
             platform: linux
             arch: x64
