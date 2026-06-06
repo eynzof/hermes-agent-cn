@@ -18,6 +18,7 @@ This document explains the fork-specific changes on `main` that diverge from ups
 | **P-011** | `tui_gateway/server.py` | Adds `slug_filter` to `model.options` and `provider.probe` RPC | desktop needs filtered model picker options and a lightweight provider health probe | Maybe upstream |
 | **P-012** | `hermes_cli/main.py` | `_model_flow_anthropic()` prompts for optional custom `base_url` instead of unconditionally removing it | Users running Anthropic-compatible proxies or alternative endpoints need to preserve a custom `base_url` during model setup | Should be upstreamed |
 | **P-013** | `model_tools.py`, `tests/run_agent/test_repair_tool_arg_keys.py` | Adds automatic tool argument key repair (`repair_tool_arg_keys`) with alias tables, per-tool overrides, fuzzy fallback, nested object/array recursion, and an optional callback hook; integrated into `handle_function_call` before type coercion | LLMs often misname arguments (e.g. "file"→"path", "cmd"→"command"); this makes tool dispatch resilient to common drift without weakening JSON Schemas | Should be upstreamed |
+| **P-014** | `.github/workflows/release-runtime.yml`, `tools/mcp_tool.py`, `hermes_cli/config.py`, `docs/RUNTIME_RELEASES.md`, `tests/tools/test_mcp_tool.py` | Bundles the native MCP client SDK into the frozen runtime (`.[web,anthropic,mcp]` + `--collect-submodules/--copy-metadata mcp` + a CI assert on `mcp-*.dist-info`), and makes `discover_mcp_tools()` warn once when `mcp_servers` is configured but the SDK is absent instead of silently no-op'ing at debug | Issue #16: the desktop runtime shipped without the `mcp` extra, so `_MCP_AVAILABLE=False` and configured `mcp_servers` registered no tools with no INFO-level log. The packaging fix is fork-specific; the diagnostic + known-root-key are generic | Packaging change is CN-specific; the `mcp_tool.py` warning and `mcp_servers` known-root-key should be upstreamed |
 
 > **P-001** (provider dict-vs-list mismatch in `tui_gateway/server.py`) — **dropped from this fork**. Upstream has since fixed it; the line `user_provs = cfg.get("providers")` in `_apply_model_switch` already does the right thing.
 
@@ -28,7 +29,7 @@ These are fork maintenance changes, not runtime behavior patches:
 | Area | Target file | What it does |
 |---|---|---|
 | Upstream sync | `scripts/sync-upstream.sh`, `.github/workflows/upstream-watch.yml`, `MAINTAINING.md` | Keeps upstream syncs on temporary PR branches instead of merging directly into `main` |
-| Managed runtime | `.github/workflows/release-runtime.yml`, `scripts/sign_runtime_manifest.py`, `docs/RUNTIME_RELEASES.md` | Builds PyInstaller runtime artifacts, signs manifests, and publishes GitHub Releases consumed by desktop |
+| Managed runtime | `.github/workflows/release-runtime.yml`, `scripts/sign_runtime_manifest.py`, `docs/RUNTIME_RELEASES.md` | Builds PyInstaller runtime artifacts, signs manifests, and publishes GitHub Releases consumed by desktop. Bundles the `[web,anthropic,mcp]` extras and asserts each SDK's `dist-info` is present in the frozen output (see P-014 for the MCP gap) |
 
 ## Per-patch detail
 
@@ -248,6 +249,25 @@ opening an upstream PR.
 **Side effects**: Minimal. The function is a pure key-mapping transform; unknown keys are left untouched. The fuzzy matcher only kicks in for keys ≥4 chars with a similarity ratio ≥0.75–0.80, so random fields are unlikely to be falsely renamed.
 
 **Should we upstream?** Yes. This is a generic robustness improvement that benefits every Hermes deployment regardless of platform or provider.
+
+---
+
+### P-014: Native MCP client missing in the frozen desktop runtime
+
+**Symptom** (issue #16): A user configures `mcp_servers` correctly in `~/.hermes/config.yaml`, the MCP server script works standalone, but the CN Desktop agent never connects to it — `agent.log` shows no MCP discovery/connection lines and no `mcp_*` tools appear. `pip install mcp` on the host does not help.
+
+**Root cause**: The native MCP client is fully implemented (`tools/mcp_tool.py`, `discover_mcp_tools()`), but the SDK is an *optional* dependency that lives only in the `[mcp]` extra. The runtime release workflow installed just `.[web,anthropic]`, so the frozen PyInstaller artifact shipped **without** the `mcp` package. Inside the frozen runtime `_MCP_AVAILABLE` is therefore `False`, and `discover_mcp_tools()` returns `[]` after logging only at `debug` level — invisible at the default INFO log level. The host's `pip install mcp` is irrelevant because the frozen runtime bundles its own interpreter and packages.
+
+**What the patch does**:
+- `release-runtime.yml`: installs `.[web,anthropic,mcp]`, adds `--collect-submodules mcp` + `--copy-metadata mcp` to PyInstaller, and extends the "Verify frozen provider SDKs" step to fail the build if `mcp-*.dist-info` is absent (so this can't silently regress).
+- `tools/mcp_tool.py`: when `mcp_servers` is configured but the SDK is unavailable, `discover_mcp_tools()` now emits a one-time `WARNING` ("mcp_servers are configured but the MCP SDK is not available …") instead of a silent debug line. Users without MCP config keep the quiet debug path.
+- `hermes_cli/config.py`: adds `mcp_servers` to `_KNOWN_ROOT_KEYS` so the documented root schema is accurate.
+- `docs/RUNTIME_RELEASES.md`: documents MCP bundling as a required runtime dep and updates the manual dry-run command.
+- Tests in `tests/tools/test_mcp_tool.py` cover the warn-when-configured, stay-quiet-when-unconfigured, and warn-once behaviors.
+
+**Side effects**: The frozen runtime grows by the `mcp` SDK and its transitive deps (`anyio`/`httpx-sse`/`sse-starlette`, all already present via `web`/`anthropic`). No behavior change for source installs that already include the `[mcp]` extra.
+
+**Should we upstream?** The packaging change is CN-runtime-specific (upstream doesn't build these PyInstaller artifacts). The `mcp_tool.py` diagnostic and the `mcp_servers` known-root-key are generic and worth upstreaming.
 
 ---
 

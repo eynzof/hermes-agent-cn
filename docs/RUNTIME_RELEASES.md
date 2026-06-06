@@ -123,13 +123,15 @@ launch (or via the in-app "check for updates" flow).
 ## Manual dry run
 
 ```
-$ pip install -e ".[web]"
+$ pip install -e ".[web,anthropic,mcp]"
 $ pip install pyinstaller cryptography
 $ pyinstaller --noconfirm --name hermes-agent-cn-runtime-win32-x64 \
     --onedir --console \
     --collect-submodules hermes_cli --collect-submodules tui_gateway \
     --collect-submodules fastapi --collect-submodules starlette \
     --collect-submodules uvicorn --collect-submodules pydantic \
+    --collect-submodules anthropic --collect-submodules mcp \
+    --copy-metadata anthropic --copy-metadata mcp \
     --collect-data hermes_cli --collect-data gateway --collect-data plugins \
     --paths . hermes_cli/main.py
 $ ./dist/hermes-agent-cn-runtime-win32-x64/hermes-agent-cn-runtime-win32-x64.exe dashboard --help
@@ -150,6 +152,15 @@ $ (cd dist && zip -r -y ../out/hermes-agent-cn-runtime-darwin-arm64.zip hermes-a
 * **Dashboard deps are bundled**: runtime artifacts must install `.[web]` and
   collect FastAPI/Uvicorn submodules so the frozen binary never lazy-installs
   `fastapi` or `uvicorn` on the user's machine.
+* **Native MCP client is bundled**: runtime artifacts must install `.[mcp]` and
+  collect the `mcp` submodules + metadata. The SDK lives only in the `[mcp]`
+  extra, so a build that installs just `.[web,anthropic]` ships without it —
+  `tools/mcp_tool.py` then sets `_MCP_AVAILABLE=False` and `discover_mcp_tools()`
+  silently registers nothing, so a desktop user's `mcp_servers` config never
+  connects (issue #16). A `pip install mcp` on the host does not help — the
+  frozen runtime uses its own bundled interpreter and packages. The release
+  workflow's "Verify frozen provider SDKs" step asserts `mcp-*.dist-info` is
+  present so this can't regress unnoticed.
 * **Lazy provider deps** (`anthropic`, `firecrawl-py`, `exa-py`, ...) are
   not bundled. `tools/lazy_deps.py` can't install at runtime inside a
   PyInstaller-frozen binary, so only providers we explicitly pre-bake

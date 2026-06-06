@@ -122,7 +122,12 @@ jobs:
           # MiniMax-CN is wired through the Anthropic Messages transport.
           # The SDK is intentionally lazy-imported in normal pip installs, so
           # the frozen runtime must install and collect it explicitly.
-          pip install -e ".[web,anthropic]"
+          # The `mcp` extra ships the native MCP client SDK. Without it,
+          # tools/mcp_tool.py sets _MCP_AVAILABLE=False and discover_mcp_tools()
+          # silently no-ops, so a desktop user's `mcp_servers` config is never
+          # connected and no `mcp_*` tools register (issue #16). `pip install mcp`
+          # on the host does NOT help — the frozen runtime bundles its own deps.
+          pip install -e ".[web,anthropic,mcp]"
           # Build tooling
           pip install pyinstaller==6.* cryptography
 
@@ -145,6 +150,7 @@ jobs:
             --collect-submodules uvicorn \
             --collect-submodules pydantic \
             --collect-submodules anthropic \
+            --collect-submodules mcp \
             --collect-data hermes_cli \
             --collect-data gateway \
             --collect-data plugins \
@@ -158,6 +164,7 @@ jobs:
             --copy-metadata uvicorn \
             --copy-metadata pydantic \
             --copy-metadata anthropic \
+            --copy-metadata mcp \
             --paths . \
             -p . \
             hermes_cli/main.py
@@ -222,6 +229,15 @@ jobs:
           if [[ -z "$metadata_dir" ]]; then
             echo "Frozen runtime is missing anthropic package metadata" >&2
             find "dist/$NAME" -maxdepth 3 -type d -name 'anthropic*' -print >&2
+            exit 1
+          fi
+          # Native MCP client SDK must ship in the frozen runtime, otherwise
+          # discover_mcp_tools() silently no-ops and desktop users' mcp_servers
+          # config is never connected (issue #16).
+          mcp_metadata_dir="$(find "dist/$NAME/_internal" -maxdepth 1 -type d -name 'mcp-*.dist-info' -print -quit)"
+          if [[ -z "$mcp_metadata_dir" ]]; then
+            echo "Frozen runtime is missing mcp package metadata" >&2
+            find "dist/$NAME" -maxdepth 3 -type d -name 'mcp*' -print >&2
             exit 1
           fi
 
