@@ -2112,10 +2112,10 @@ DEFAULT_CONFIG = {
     # curated model lists for OpenRouter and Nous Portal from this URL,
     # falling back to the in-repo snapshot on network failure.  Lets us
     # update model picker lists without shipping a hermes-agent release.
-    # The default URL is served by the docs site GitHub Pages deploy.
+    # The default URL is served by the CN Desktop landing site mirror.
     "model_catalog": {
         "enabled": True,
-        "url": "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json",
+        "url": "https://desktop.hermesagent.org.cn/api/model-catalog.json",
         # Disk cache TTL in hours.  Beyond this, the CLI refetches on the
         # next /model or `hermes model` invocation; network failures
         # silently fall back to the stale cache.
@@ -2422,7 +2422,7 @@ DEFAULT_CONFIG = {
 
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 27,
+    "_config_version": 28,
 }
 
 # =============================================================================
@@ -4734,6 +4734,24 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             results["config_added"].append("model_catalog.ttl_hours 24→1")
             if not quiet:
                 print("  ✓ Lowered model_catalog.ttl_hours to 1 (hourly picker refresh)")
+
+    # ── Version 27 → 28: point the model catalog at the CN Desktop mirror ──
+    # Only rewrite the historical upstream defaults; a user-specified custom
+    # catalog URL remains authoritative.
+    if current_ver < 28:
+        config = read_raw_config()
+        raw_mc = config.get("model_catalog")
+        old_default_urls = {
+            "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json",
+            "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/website/static/api/model-catalog.json",
+        }
+        if isinstance(raw_mc, dict) and raw_mc.get("url") in old_default_urls:
+            raw_mc["url"] = "https://desktop.hermesagent.org.cn/api/model-catalog.json"
+            config["model_catalog"] = raw_mc
+            save_config(config)
+            results["config_added"].append("model_catalog.url → CN Desktop mirror")
+            if not quiet:
+                print("  ✓ Updated model_catalog.url to the CN Desktop mirror")
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")
