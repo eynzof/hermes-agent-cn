@@ -23,7 +23,13 @@ const https = require('node:https')
 const net = require('node:net')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
-const { execFileSync, spawn } = require('node:child_process')
+const { execFile, execFileSync, spawn } = require('node:child_process')
+const { promisify } = require('node:util')
+// Async child-process runner for backend resolution. The resolver runs on the
+// Electron main (HWND-owning) thread during startup; execFileSync there blocks
+// the Windows window message pump (reg/py.exe/python probes are full
+// CreateProcess calls, AV-scanned, one with a 5s timeout) → ANR.
+const execFileAsync = promisify(execFile)
 const { detectRemoteDisplay, isWindowsBinaryPathInWsl, isWslEnvironment } = require('./bootstrap-platform.cjs')
 const { runBootstrap } = require('./bootstrap-runner.cjs')
 const { canImportHermesCli, verifyHermesCli } = require('./backend-probes.cjs')
@@ -951,7 +957,7 @@ function isHermesSourceRoot(root) {
   return directoryExists(root) && fileExists(path.join(root, 'hermes_cli', 'main.py'))
 }
 
-function findPythonForRoot(root) {
+async function findPythonForRoot(root) {
   const override = process.env.HERMES_DESKTOP_PYTHON
   if (override && fileExists(override)) return override
 
@@ -964,10 +970,10 @@ function findPythonForRoot(root) {
     if (fileExists(candidate)) return candidate
   }
 
-  return findSystemPython()
+  return await findSystemPython()
 }
 
-function findSystemPython() {
+async function findSystemPython() {
   if (!IS_WINDOWS) {
     // POSIX systems: PATH lookup is safe.
     for (const command of ['python3', 'python']) {
@@ -1024,10 +1030,10 @@ function findSystemPython() {
   for (const hive of ['HKLM', 'HKCU']) {
     for (const version of SUPPORTED_VERSIONS) {
       try {
-        const out = execFileSync(
+        const { stdout: out } = await execFileAsync(
           'reg',
           ['query', `${hive}\\SOFTWARE\\Python\\PythonCore\\${version}\\InstallPath`, '/ve', '/reg:64'],
-          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+          { encoding: 'utf8', windowsHide: true }
         )
         // Output format: "    (Default)    REG_SZ    C:\Path\To\Python\"
         const match = out.match(/REG_SZ\s+(.+?)\s*$/m)
@@ -1063,9 +1069,9 @@ function findSystemPython() {
   if (pyExe) {
     for (const version of SUPPORTED_VERSIONS) {
       try {
-        const out = execFileSync(pyExe, [`-${version}`, '-c', 'import sys; print(sys.executable)'], {
+        const { stdout: out } = await execFileAsync(pyExe, [`-${version}`, '-c', 'import sys; print(sys.executable)'], {
           encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'ignore']
+          windowsHide: true
         })
         const candidate = out.trim()
         if (candidate && fileExists(candidate)) return candidate
@@ -1882,8 +1888,8 @@ function writeDefaultProjectDir(dir) {
   }
 }
 
-function createPythonBackend(root, label, dashboardArgs, options = {}) {
-  const python = findPythonForRoot(root)
+async function createPythonBackend(root, label, dashboardArgs, options = {}) {
+  const python = await findPythonForRoot(root)
   if (!python) return null
 
   return {
@@ -1904,13 +1910,14 @@ function createPythonBackend(root, label, dashboardArgs, options = {}) {
 // canonical install location shared with the CLI installer. The venv at
 // VENV_ROOT may not exist yet on first run; bootstrap=true tells
 // ensureRuntime() to create / refresh it before launch.
-function createActiveBackend(dashboardArgs) {
+async function createActiveBackend(dashboardArgs) {
   const venvPython = getVenvPython(VENV_ROOT)
+  const command = fileExists(venvPython) ? venvPython : await findSystemPython()
 
   return {
     kind: 'python',
     label: `Hermes at ${ACTIVE_HERMES_ROOT}`,
-    command: fileExists(venvPython) ? venvPython : findSystemPython(),
+    command,
     args: ['-m', 'hermes_cli.main', ...dashboardArgs],
     env: {
       PYTHONPATH: [ACTIVE_HERMES_ROOT, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter)
@@ -1921,12 +1928,12 @@ function createActiveBackend(dashboardArgs) {
   }
 }
 
-function resolveHermesBackend(dashboardArgs) {
+async function resolveHermesBackend(dashboardArgs) {
   // 1. Explicit override -- HERMES_DESKTOP_HERMES_ROOT points at a developer
   //    checkout. Honour it as-is (no bootstrap; the user is driving).
   const overrideRoot = process.env.HERMES_DESKTOP_HERMES_ROOT && path.resolve(process.env.HERMES_DESKTOP_HERMES_ROOT)
   if (overrideRoot && isHermesSourceRoot(overrideRoot)) {
-    const backend = createPythonBackend(overrideRoot, `Hermes source at ${overrideRoot}`, dashboardArgs)
+    const backend = await createPythonBackend(overrideRoot, `Hermes source at ${overrideRoot}`, dashboardArgs)
     if (backend) return backend
   }
 
@@ -1935,7 +1942,7 @@ function resolveHermesBackend(dashboardArgs) {
   //    installed `hermes` on PATH so local Python edits are actually exercised.
   //    (In dev with no checkout, SOURCE_REPO_ROOT won't pass isHermesSourceRoot.)
   if (!IS_PACKAGED && isHermesSourceRoot(SOURCE_REPO_ROOT)) {
-    const backend = createPythonBackend(SOURCE_REPO_ROOT, `Hermes source at ${SOURCE_REPO_ROOT}`, dashboardArgs)
+    const backend = await createPythonBackend(SOURCE_REPO_ROOT, `Hermes source at ${SOURCE_REPO_ROOT}`, dashboardArgs)
     if (backend) return backend
   }
 
@@ -1946,7 +1953,7 @@ function resolveHermesBackend(dashboardArgs) {
   //    to spawning hermes. Updates flow through the in-app update path
   //    (applyUpdates -> git pull) or `hermes update` from the CLI.
   if (isBootstrapComplete()) {
-    return createActiveBackend(dashboardArgs)
+    return await createActiveBackend(dashboardArgs)
   }
 
   // 4. Existing `hermes` on PATH -- installed via install.ps1 / install.sh from
@@ -1987,7 +1994,7 @@ function resolveHermesBackend(dashboardArgs) {
       // `--version` probe (see backend-probes.cjs) catches that case
       // and lets the resolver fall through to step 6 / bootstrap.
       const shellForProbe = isCommandScript(hermesCommand)
-      if (verifyHermesCli(hermesCommand, { shell: shellForProbe })) {
+      if (await verifyHermesCli(hermesCommand, { shell: shellForProbe })) {
         return {
           label: `existing Hermes CLI at ${hermesCommand}`,
           command: hermesCommand,
@@ -2007,7 +2014,7 @@ function resolveHermesBackend(dashboardArgs) {
   // 5. Last-ditch: pip-installed hermes_cli module via system Python.
   //    Same rationale as #4 -- the user installed this; we use it but don't
   //    take ownership.
-  const python = findSystemPython()
+  const python = await findSystemPython()
   if (python) {
     // Same smoke-test rationale as step 4: a system Python in the
     // SUPPORTED_VERSIONS range can be registered (PEP 514) without
@@ -2017,7 +2024,7 @@ function resolveHermesBackend(dashboardArgs) {
     // Verify the import works before trusting the candidate; on
     // failure, fall through to step 6 so the bootstrap runner pulls
     // a uv-managed 3.11 into %LOCALAPPDATA%\hermes\hermes-agent\venv.
-    if (canImportHermesCli(python)) {
+    if (await canImportHermesCli(python)) {
       return {
         kind: 'python',
         label: `installed hermes_cli module via ${python}`,
@@ -2147,7 +2154,7 @@ async function ensureRuntime(backend) {
     rememberLog('[bootstrap] bootstrap complete; marker written. Re-resolving backend.')
     // Re-resolve now that the install exists. The new resolution lands in
     // step 3 (bootstrap-complete marker) and we recurse to wire venvPython.
-    return ensureRuntime(resolveHermesBackend(backend.args))
+    return ensureRuntime(await resolveHermesBackend(backend.args))
   }
 
   // bootstrap=true with a real backend (createActiveBackend path) means we
@@ -4273,7 +4280,7 @@ async function spawnPoolBackend(profile, entry) {
   // --profile wins over the inherited HERMES_HOME env (see _apply_profile_override
   // step 3 in hermes_cli/main.py), so the child re-homes to this profile.
   const dashboardArgs = ['--profile', profile, 'dashboard', '--no-open', '--host', '127.0.0.1', '--port', String(port)]
-  const backend = await ensureRuntime(resolveHermesBackend(dashboardArgs))
+  const backend = await ensureRuntime(await resolveHermesBackend(dashboardArgs))
   const hermesCwd = resolveHermesCwd()
   const webDist = resolveWebDist()
 
@@ -4405,7 +4412,7 @@ async function startHermes() {
       dashboardArgs.unshift('--profile', activeProfile)
     }
     await advanceBootProgress('backend.runtime', 'Resolving Hermes runtime', 28)
-    const backend = await ensureRuntime(resolveHermesBackend(dashboardArgs))
+    const backend = await ensureRuntime(await resolveHermesBackend(dashboardArgs))
     const hermesCwd = resolveHermesCwd()
     const webDist = resolveWebDist()
 
