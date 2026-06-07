@@ -16,8 +16,8 @@ Usage::
 
 Output: ``website/static/api/model-catalog.json``
 
-Live URL (after ``deploy-site.yml`` runs on merge to main):
-``https://hermes-agent.nousresearch.com/docs/api/model-catalog.json``
+Live mirror URL (after the landing site deploy syncs this file):
+``https://desktop.hermesagent.org.cn/api/model-catalog.json``
 """
 
 from __future__ import annotations
@@ -44,8 +44,8 @@ def build_catalog() -> dict:
         "version": CATALOG_VERSION,
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "metadata": {
-            "source": "hermes-agent repo",
-            "docs": "https://hermes-agent.nousresearch.com/docs/reference/model-catalog",
+            "source": "Hermes-CN-Core repo",
+            "docs": "https://github.com/Eynzof/Hermes-CN-Core/blob/main/website/docs/reference/model-catalog.md",
         },
         "providers": {
             "openrouter": {

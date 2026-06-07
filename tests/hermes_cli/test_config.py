@@ -826,6 +826,65 @@ class TestCustomProviderCompatibility:
         assert models == ["qwen3-coder", "glm-5.1", "kimi-k2.5"]
 
 
+class TestModelCatalogConfigMigration:
+    def test_default_config_uses_cn_desktop_model_catalog(self):
+        assert (
+            DEFAULT_CONFIG["model_catalog"]["url"]
+            == "https://desktop.hermesagent.org.cn/api/model-catalog.json"
+        )
+
+    def test_migrate_replaces_old_default_model_catalog_url(self, tmp_path):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "_config_version": 27,
+                    "model_catalog": {
+                        "enabled": True,
+                        "url": "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json",
+                        "ttl_hours": 1,
+                        "providers": {},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            migrate_config(interactive=False, quiet=True)
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+        assert raw["_config_version"] == DEFAULT_CONFIG["_config_version"]
+        assert (
+            raw["model_catalog"]["url"]
+            == "https://desktop.hermesagent.org.cn/api/model-catalog.json"
+        )
+
+    def test_migrate_preserves_custom_model_catalog_url(self, tmp_path):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "_config_version": 27,
+                    "model_catalog": {
+                        "enabled": True,
+                        "url": "https://catalog.example.com/model-catalog.json",
+                        "ttl_hours": 1,
+                        "providers": {},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            migrate_config(interactive=False, quiet=True)
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+        assert raw["_config_version"] == DEFAULT_CONFIG["_config_version"]
+        assert raw["model_catalog"]["url"] == "https://catalog.example.com/model-catalog.json"
+
+
 class TestInterimAssistantMessageConfig:
     """Test the explicit gateway interim-message config gate."""
 
