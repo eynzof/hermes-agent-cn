@@ -376,23 +376,27 @@ function looksBinary(buffer) {
   return suspicious / buffer.length > 0.12
 }
 
-function previewFileMetadata(filePath, mimeType) {
+async function previewFileMetadata(filePath, mimeType) {
   let byteSize = 0
   let binary = false
 
   try {
-    const stat = fs.statSync(filePath)
+    const stat = await fs.promises.stat(filePath)
     byteSize = stat.size
 
     if (!mimeType.startsWith('image/')) {
-      const fd = fs.openSync(filePath, 'r')
+      // Was synchronous openSync/readSync/closeSync on the main thread — a
+      // large or AV-scanned file (Windows scans on first open) blocked the
+      // window message pump for the whole open+read. Async handle keeps it off
+      // the UI thread.
+      const handle = await fs.promises.open(filePath, 'r')
 
       try {
         const sample = Buffer.alloc(Math.min(byteSize, 4096))
-        const bytesRead = fs.readSync(fd, sample, 0, sample.length, 0)
+        const { bytesRead } = await handle.read(sample, 0, sample.length, 0)
         binary = looksBinary(sample.subarray(0, bytesRead))
       } finally {
-        fs.closeSync(fd)
+        await handle.close()
       }
     }
   } catch {
@@ -511,6 +515,13 @@ let bootstrapFailure = null
 let bootstrapAbortController = null
 let connectionConfigCache = null
 let connectionConfigCacheMtime = null
+// Last time we revalidated the cache against disk. hermes:api consults the
+// connection config on most REST calls; on Windows each statSync is a blocking
+// syscall that AV/EDR filter drivers can inflate to milliseconds, so a burst of
+// API calls would otherwise stat this file dozens of times back-to-back on the
+// UI thread. Bound the disk check to once per TTL window.
+let connectionConfigCacheCheckedAt = 0
+const CONNECTION_CONFIG_STAT_TTL_MS = 1000
 const hermesLog = []
 const previewWatchers = new Map()
 let previewShortcutActive = false
@@ -842,6 +853,26 @@ function fileExists(filePath) {
 function directoryExists(filePath) {
   try {
     return fs.statSync(filePath).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// Async variants for hot paths that run on user-supplied paths (file preview).
+// The sync fileExists/directoryExists above are used throughout boot/path
+// resolution where blocking is acceptable; on the preview path a slow/AV-
+// scanned/network file must NOT block the main thread, so use these instead.
+async function isFileAsync(filePath) {
+  try {
+    return (await fs.promises.stat(filePath)).isFile()
+  } catch {
+    return false
+  }
+}
+
+async function isDirectoryAsync(filePath) {
+  try {
+    return (await fs.promises.stat(filePath)).isDirectory()
   } catch {
     return false
   }
@@ -2695,23 +2726,23 @@ function expandUserPath(filePath) {
   return value
 }
 
-function previewFileTarget(rawTarget, baseDir) {
+async function previewFileTarget(rawTarget, baseDir) {
   const raw = String(rawTarget || '').trim()
   const base = baseDir ? path.resolve(expandUserPath(baseDir)) : resolveHermesCwd()
   const filePath = raw.startsWith('file:') ? fileURLToPath(raw) : path.resolve(base, expandUserPath(raw))
   let resolved = filePath
 
-  if (directoryExists(resolved)) {
+  if (await isDirectoryAsync(resolved)) {
     resolved = path.join(resolved, 'index.html')
   }
 
   const ext = path.extname(resolved).toLowerCase()
-  if (!fileExists(resolved)) {
+  if (!(await isFileAsync(resolved))) {
     return null
   }
 
   const mimeType = mimeTypeForPath(resolved)
-  const metadata = previewFileMetadata(resolved, mimeType)
+  const metadata = await previewFileMetadata(resolved, mimeType)
   const isHtml = PREVIEW_HTML_EXTENSIONS.has(ext)
   const isImage = mimeType.startsWith('image/')
   const previewKind = isHtml ? 'html' : isImage ? 'image' : metadata.binary ? 'binary' : 'text'
@@ -2755,7 +2786,7 @@ function previewUrlTarget(rawTarget) {
   }
 }
 
-function normalizePreviewTarget(rawTarget, baseDir) {
+async function normalizePreviewTarget(rawTarget, baseDir) {
   const raw = String(rawTarget || '').trim()
 
   if (!raw) {
@@ -2767,7 +2798,7 @@ function normalizePreviewTarget(rawTarget, baseDir) {
       return previewUrlTarget(raw)
     }
 
-    return previewFileTarget(raw, baseDir)
+    return await previewFileTarget(raw, baseDir)
   } catch {
     return null
   }
@@ -3628,6 +3659,17 @@ function sanitizeConnectionProfiles(raw) {
 }
 
 function readDesktopConnectionConfig() {
+  // Hot-path guard: within the TTL window, trust the in-memory cache and skip
+  // the blocking statSync entirely. Our own writes refresh the cache inline via
+  // writeDesktopConnectionConfig, so the only thing the disk check buys us is
+  // picking up edits made by another process/tool — a ~1s delay on that is fine
+  // and keeps the UI thread off the filesystem under API bursts.
+  const now = Date.now()
+  if (connectionConfigCache && now - connectionConfigCacheCheckedAt < CONNECTION_CONFIG_STAT_TTL_MS) {
+    return connectionConfigCache
+  }
+  connectionConfigCacheCheckedAt = now
+
   // Check if file changed on disk since last read (e.g. modified by another
   // process or an external tool).  Our own writes update the cache inline
   // via writeDesktopConnectionConfig, but external changes would be missed.
@@ -3678,6 +3720,7 @@ function writeDesktopConnectionConfig(config) {
   writeFileAtomic(DESKTOP_CONNECTION_CONFIG_PATH, JSON.stringify(config, null, 2))
   connectionConfigCache = config
   connectionConfigCacheMtime = fs.statSync(DESKTOP_CONNECTION_CONFIG_PATH).mtimeMs
+  connectionConfigCacheCheckedAt = Date.now()
 }
 
 // Returns the desktop's chosen profile name, or null when unset. "default" is
@@ -5090,16 +5133,21 @@ const FS_READDIR_HIDDEN = new Set([
   'venv'
 ])
 
-function findGitRoot(start) {
+async function findGitRoot(start) {
   let dir = start
 
   for (let i = 0; i < 50; i += 1) {
     try {
-      if (fs.existsSync(path.join(dir, '.git'))) {
-        return dir
-      }
+      // Async existence check: the old synchronous fs.existsSync ran up to 50
+      // blocking syscalls on the main (HWND-owning) thread, and on Windows each
+      // one is inflated by AV/EDR filter drivers and OneDrive/UNC redirection —
+      // enough to freeze the window message pump ("应用程序没有响应"). access()
+      // throws for both missing and unreadable paths; either way this dir isn't
+      // a resolvable git root, so keep walking up rather than aborting.
+      await fs.promises.access(path.join(dir, '.git'))
+      return dir
     } catch {
-      return null
+      // .git not here — continue to the parent.
     }
 
     const parent = path.dirname(dir)
@@ -5227,9 +5275,9 @@ ipcMain.handle('hermes:fs:gitRoot', async (_event, startPath) => {
     const stat = await fs.promises.stat(resolved)
     const start = stat.isDirectory() ? resolved : path.dirname(resolved)
 
-    return findGitRoot(start)
+    return await findGitRoot(start)
   } catch {
-    return findGitRoot(resolved)
+    return await findGitRoot(resolved)
   }
 })
 
