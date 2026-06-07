@@ -4293,7 +4293,11 @@ async function spawnPoolBackend(profile, entry) {
       HERMES_HOME,
       ...backend.env,
       HERMES_DASHBOARD_SESSION_TOKEN: token,
-      HERMES_WEB_DIST: webDist
+      HERMES_WEB_DIST: webDist,
+      // Mark every backend the desktop spawns as desktop-managed so the
+      // gateway restart it triggers won't silently hand off to a foreign
+      // gateway service / second install (issue #168).
+      HERMES_DESKTOP_MANAGED: '1'
     },
     shell: backend.shell,
     stdio: ['ignore', 'pipe', 'pipe']
@@ -4434,7 +4438,11 @@ async function startHermes() {
         HERMES_HOME,
         ...backend.env,
         HERMES_DASHBOARD_SESSION_TOKEN: token,
-        HERMES_WEB_DIST: webDist
+        HERMES_WEB_DIST: webDist,
+        // Mark the primary backend as desktop-managed so a gateway restart it
+        // triggers takes over its own gateway rather than silently restarting a
+        // pre-existing Windows gateway service / foreign install (issue #168).
+        HERMES_DESKTOP_MANAGED: '1'
       },
       shell: backend.shell,
       stdio: ['ignore', 'pipe', 'pipe']

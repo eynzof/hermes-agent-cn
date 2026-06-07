@@ -67,6 +67,7 @@ export type {
   HermesConfig,
   HermesConfigRecord,
   LogsResponse,
+  MessagingConflictDetail,
   MessagingEnvVarInfo,
   MessagingHomeChannel,
   MessagingPlatformInfo,
@@ -634,9 +635,12 @@ export function setModelAssignment(body: ModelAssignmentRequest): Promise<ModelA
   })
 }
 
-export function restartGateway(): Promise<ActionResponse> {
+export function restartGateway(force = false): Promise<ActionResponse> {
+  // `force` requests a desktop-managed takeover: the backend stops any foreign
+  // gateway service / other local instance and runs a gateway the desktop owns
+  // in its place (issue #168).
   return window.hermesDesktop.api<ActionResponse>({
-    path: '/api/gateway/restart',
+    path: force ? '/api/gateway/restart?force=1' : '/api/gateway/restart',
     method: 'POST'
   })
 }

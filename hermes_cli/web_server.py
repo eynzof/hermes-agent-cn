@@ -1337,11 +1337,15 @@ def _record_completed_action(name: str, message: str, exit_code: int = 1) -> Non
     _ACTION_RESULTS[name] = {"exit_code": exit_code, "pid": None}
 
 
-def _spawn_hermes_action(subcommand: List[str], name: str) -> subprocess.Popen:
+def _spawn_hermes_action(
+    subcommand: List[str], name: str, extra_env: Optional[Dict[str, str]] = None
+) -> subprocess.Popen:
     """Spawn ``hermes <subcommand>`` detached and record the Popen handle.
 
     Uses the running interpreter's ``hermes_cli.main`` module so the action
-    inherits the same venv/PYTHONPATH the web server is using.
+    inherits the same venv/PYTHONPATH the web server is using. ``extra_env``
+    overlays additional environment variables on the child (e.g. a one-shot
+    ``HERMES_GATEWAY_FORCE_TAKEOVER`` for a desktop-initiated takeover).
     """
     log_file_name = _ACTION_LOG_FILES[name]
     _ACTION_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -1358,7 +1362,7 @@ def _spawn_hermes_action(subcommand: List[str], name: str) -> subprocess.Popen:
         "stdin": subprocess.DEVNULL,
         "stdout": log_file,
         "stderr": subprocess.STDOUT,
-        "env": {**os.environ, "HERMES_NONINTERACTIVE": "1"},
+        "env": {**os.environ, "HERMES_NONINTERACTIVE": "1", **(extra_env or {})},
     }
     if sys.platform == "win32":
         popen_kwargs["creationflags"] = (
@@ -1393,10 +1397,20 @@ def _tail_lines(path: Path, n: int) -> List[str]:
 
 
 @app.post("/api/gateway/restart")
-async def restart_gateway():
-    """Kick off a ``hermes gateway restart`` in the background."""
+async def restart_gateway(force: bool = False):
+    """Kick off a ``hermes gateway restart`` in the background.
+
+    ``force=1`` requests a desktop-managed *takeover*: the spawned restart
+    stops any foreign Windows gateway service / other local gateway and runs a
+    gateway the desktop owns in its place (issue #168). Without it, a
+    desktop-managed restart that finds a foreign service declines and records a
+    conflict for the UI rather than restarting the wrong gateway.
+    """
+    extra_env = {"HERMES_GATEWAY_FORCE_TAKEOVER": "1"} if force else None
     try:
-        proc = _spawn_hermes_action(["gateway", "restart"], "gateway-restart")
+        proc = _spawn_hermes_action(
+            ["gateway", "restart"], "gateway-restart", extra_env=extra_env
+        )
     except Exception as exc:
         _log.exception("Failed to spawn gateway restart")
         raise HTTPException(status_code=500, detail=f"Failed to restart gateway: {exc}")
@@ -3304,6 +3318,39 @@ def _messaging_platform_payload(
     elif not gateway_running and not state:
         state = "gateway_stopped"
 
+    error_code = (
+        runtime_platform.get("error_code")
+        if isinstance(runtime_platform, dict)
+        else None
+    )
+    error_message = (
+        runtime_platform.get("error_message")
+        if isinstance(runtime_platform, dict)
+        else None
+    )
+    error_detail = (
+        runtime_platform.get("error_detail")
+        if isinstance(runtime_platform, dict)
+        else None
+    )
+
+    # A gateway-level conflict (e.g. a foreign Windows service the desktop
+    # declined to restart, issue #168) isn't tied to one platform's runtime
+    # record, so surface it on each enabled+configured platform that doesn't
+    # already carry its own more-specific error. This drives the desktop's
+    # conflict prompt + one-click takeover on the channel the user is setting up.
+    gateway_conflict = runtime.get("gateway_conflict") if isinstance(runtime, dict) else None
+    if (
+        enabled
+        and configured
+        and not error_code
+        and isinstance(gateway_conflict, dict)
+    ):
+        kind = gateway_conflict.get("kind") or "service"
+        error_code = f"gateway_conflict_{kind}"
+        error_message = gateway_conflict.get("message") or error_message
+        error_detail = gateway_conflict
+
     return {
         "id": platform_id,
         "name": entry["name"],
@@ -3313,16 +3360,9 @@ def _messaging_platform_payload(
         "configured": configured,
         "gateway_running": gateway_running,
         "state": state,
-        "error_code": (
-            runtime_platform.get("error_code")
-            if isinstance(runtime_platform, dict)
-            else None
-        ),
-        "error_message": (
-            runtime_platform.get("error_message")
-            if isinstance(runtime_platform, dict)
-            else None
-        ),
+        "error_code": error_code,
+        "error_message": error_message,
+        "error_detail": error_detail,
         "updated_at": (
             runtime_platform.get("updated_at")
             if isinstance(runtime_platform, dict)

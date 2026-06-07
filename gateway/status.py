@@ -526,6 +526,7 @@ def write_runtime_status(
     platform_state: Any = _UNSET,
     error_code: Any = _UNSET,
     error_message: Any = _UNSET,
+    error_detail: Any = _UNSET,
 ) -> None:
     """Persist gateway runtime health information for diagnostics/status."""
     path = _get_runtime_status_path()
@@ -555,6 +556,12 @@ def write_runtime_status(
             platform_payload["error_code"] = error_code
         if error_message is not _UNSET:
             platform_payload["error_message"] = error_message
+        if error_detail is not _UNSET:
+            # ``None`` clears any prior structured detail; a dict replaces it.
+            if error_detail is None:
+                platform_payload.pop("error_detail", None)
+            else:
+                platform_payload["error_detail"] = error_detail
         platform_payload["updated_at"] = _utc_now_iso()
         payload["platforms"][platform] = platform_payload
 
@@ -564,6 +571,88 @@ def write_runtime_status(
 def read_runtime_status() -> Optional[dict[str, Any]]:
     """Read the persisted gateway runtime health/status information."""
     return _read_json_file(_get_runtime_status_path())
+
+
+def set_gateway_conflict(detail: Optional[dict]) -> None:
+    """Set or clear the top-level gateway-level conflict marker.
+
+    Written by the short-lived ``hermes gateway restart`` helper (not the live
+    gateway) when it declines to restart a foreign gateway, so — unlike
+    :func:`write_runtime_status` — it must NOT stamp pid/argv/start_time of the
+    helper over the record. Pass ``None`` to clear once a desktop-managed
+    gateway starts in the foreign one's place.
+    """
+    path = _get_runtime_status_path()
+    payload = _read_json_file(path) or _build_runtime_status_record()
+    payload.setdefault("platforms", {})
+    if detail is None:
+        payload.pop("gateway_conflict", None)
+    else:
+        record = dict(detail)
+        record.setdefault("updated_at", _utc_now_iso())
+        payload["gateway_conflict"] = record
+    _write_json_file(path, payload)
+
+
+def classify_port_conflict(port: int) -> dict[str, Any]:
+    """Describe who holds ``port`` so callers can decide whether takeover is safe.
+
+    Used when a platform (e.g. Feishu webhook) fails to bind because the port
+    is already in use. On a single machine the owner is a local PID we *could*
+    stop. But under WSL2 the foreign listener lives in a separate VM and only
+    surfaces on the Windows loopback via the localhost-forwarding relay — the
+    real PID is invisible to ``psutil`` here. We use that distinction to gate
+    the desktop's "force takeover" action: only same-machine owners can be
+    taken over; a WSL/cross-VM owner gets a "stop the other instance" hint
+    instead.
+
+    Returns a dict shaped for ``error_detail``:
+        {"kind": "port", "port": <int>, "can_takeover": <bool>,
+         "owner_pid": <int|None>, "owner_home": <str|None>}
+    ``can_takeover`` is True only when a local process owning the port is found.
+    """
+    detail: dict[str, Any] = {
+        "kind": "port",
+        "port": int(port),
+        "can_takeover": False,
+        "owner_pid": None,
+        "owner_home": None,
+    }
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        # No psutil → can't resolve the owner; treat as non-takeover-able so we
+        # never claim a takeover we can't actually perform.
+        return detail
+
+    try:
+        for conn in psutil.net_connections(kind="inet"):
+            laddr = getattr(conn, "laddr", None)
+            if not laddr or getattr(laddr, "port", None) != int(port):
+                continue
+            # LISTEN sockets are the binders; a foreign relay won't expose a PID.
+            if conn.status not in (psutil.CONN_LISTEN, getattr(psutil, "CONN_NONE", "NONE")):
+                continue
+            owner_pid = getattr(conn, "pid", None)
+            if owner_pid is None:
+                # Port is held but the owning PID isn't visible (typical for the
+                # WSL2 loopback relay) → not takeover-able from here.
+                continue
+            detail["owner_pid"] = int(owner_pid)
+            detail["can_takeover"] = True
+            try:
+                env = psutil.Process(int(owner_pid)).environ()
+                home = env.get("HERMES_HOME")
+                if home:
+                    detail["owner_home"] = str(home)
+            except Exception:
+                pass
+            break
+    except Exception:
+        # net_connections can raise AccessDenied on locked-down hosts; degrade
+        # gracefully to "owner unknown, no takeover".
+        pass
+    return detail
 
 
 def remove_pid_file() -> None:

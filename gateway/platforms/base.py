@@ -2062,12 +2062,23 @@ class BasePlatformAdapter(ABC):
             return
         self._write_runtime_status_safe("disconnected", platform_state="disconnected", error_code=None, error_message=None)
 
-    def _set_fatal_error(self, code: str, message: str, *, retryable: bool) -> None:
+    def _set_fatal_error(
+        self, code: str, message: str, *, retryable: bool, error_detail: Optional[dict] = None
+    ) -> None:
         self._running = False
         self._fatal_error_code = code
         self._fatal_error_message = message
         self._fatal_error_retryable = retryable
-        self._write_runtime_status_safe("fatal", platform_state="fatal", error_code=code, error_message=message)
+        # ``error_detail`` carries structured conflict info (e.g. a port-in-use
+        # owner) so the desktop can offer a targeted "force takeover" action.
+        # Pass ``None`` explicitly to clear any stale detail from a prior fault.
+        self._write_runtime_status_safe(
+            "fatal",
+            platform_state="fatal",
+            error_code=code,
+            error_message=message,
+            error_detail=error_detail,
+        )
 
     def _write_runtime_status_safe(self, context: str, **kwargs) -> None:
         """Write runtime status; log first failure per context at warning, rest at debug.

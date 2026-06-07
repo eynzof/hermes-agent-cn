@@ -9,8 +9,10 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import {
   getMessagingPlatforms,
+  type MessagingConflictDetail,
   type MessagingEnvVarInfo,
   type MessagingPlatformInfo,
+  restartGateway,
   updateMessagingPlatform
 } from '@/hermes'
 import { type Translations, useI18n } from '@/i18n'
@@ -413,6 +415,7 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
                     }
                   }))
                 }
+                onRefresh={() => void refreshPlatforms()}
                 onSave={() => void handleSave(selected)}
                 onToggle={enabled => void handleToggle(selected, enabled)}
                 platform={selected}
@@ -459,6 +462,7 @@ function PlatformDetail({
   edits,
   onClear,
   onEdit,
+  onRefresh,
   onSave,
   onToggle,
   platform,
@@ -467,6 +471,7 @@ function PlatformDetail({
   edits: Record<string, string>
   onClear: (key: string) => void
   onEdit: (key: string, value: string) => void
+  onRefresh: () => void
   onSave: () => void
   onToggle: (enabled: boolean) => void
   platform: MessagingPlatformInfo
@@ -505,11 +510,15 @@ function PlatformDetail({
             </div>
           </header>
 
-          {platform.error_message && (
-            <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-destructive">
-              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-              <span>{platform.error_message}</span>
-            </div>
+          {isGatewayConflict(platform.error_code) ? (
+            <GatewayConflictNotice m={m} onRefresh={onRefresh} platform={platform} />
+          ) : (
+            platform.error_message && (
+              <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-destructive">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                <span>{platform.error_message}</span>
+              </div>
+            )
           )}
 
           <section>
@@ -726,6 +735,80 @@ function MessagingField({
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h4 className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{children}</h4>
+}
+
+// A `gateway_conflict_*` error_code means another Hermes Agent (a foreign
+// Windows service, or a second/WSL install over the shared loopback) is
+// blocking the desktop from starting the gateway with the params just saved
+// (issue #168). These get a richer prompt than a plain error string.
+function isGatewayConflict(errorCode: null | string | undefined): boolean {
+  return typeof errorCode === 'string' && errorCode.startsWith('gateway_conflict_')
+}
+
+function GatewayConflictNotice({
+  m,
+  onRefresh,
+  platform
+}: {
+  m: Translations['messaging']
+  onRefresh: () => void
+  platform: MessagingPlatformInfo
+}) {
+  const [busy, setBusy] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
+  const detail: MessagingConflictDetail = platform.error_detail || {}
+  const canTakeover = detail.can_takeover === true
+  const isPort = detail.kind === 'port'
+
+  const body = isPort ? m.conflictPortBody : m.conflictServiceBody
+  const helpSteps = isPort ? m.conflictHelpPort : m.conflictHelpService
+
+  async function handleTakeover() {
+    setBusy(true)
+    try {
+      await restartGateway(true)
+      notify({ kind: 'success', title: m.takeoverStarted, message: m.restartToReconnect })
+    } catch (err) {
+      notifyError(err, m.takeoverFailed)
+    } finally {
+      setBusy(false)
+      onRefresh()
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height)">
+      <div className="flex items-start gap-2 text-amber-700 dark:text-amber-400">
+        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+        <div className="min-w-0 space-y-1">
+          <p className="font-semibold">{m.conflictTitle}</p>
+          <p className="text-(--ui-text-secondary)">{body}</p>
+          {platform.error_message && (
+            <p className="break-words text-[0.66rem] text-(--ui-text-tertiary)">{platform.error_message}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button disabled={!canTakeover || busy} onClick={() => void handleTakeover()} size="sm" variant="textStrong">
+          {busy ? m.takingOver : m.forceTakeover}
+        </Button>
+        <Button onClick={() => setShowHelp(value => !value)} size="sm" variant="text">
+          {m.howToStopOthers}
+        </Button>
+      </div>
+
+      {!canTakeover && <p className="text-[0.66rem] text-(--ui-text-tertiary)">{m.conflictTakeoverUnavailable}</p>}
+
+      {showHelp && (
+        <ul className="ml-4 list-disc space-y-1 text-(--ui-text-secondary)">
+          {helpSteps.map(step => (
+            <li key={step}>{step}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 function PlatformHint({ platform }: { platform: MessagingPlatformInfo }) {
