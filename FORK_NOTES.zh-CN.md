@@ -309,7 +309,7 @@
 3. **`model_tools.py`** — 缓存失效：
    - 将 `_shell_fp`（当前 shell 类型）加入 `get_tool_definitions()` 缓存键。确保会话中期 pwsh 自动安装（会改变 terminal 描述）能使缓存的工具定义失效。
 
-4. **`tests/tools/test_terminal_dynamic_description.py`** — 14 个测试覆盖：
+4. **`tests/tools/test_terminal_dynamic_description.py`** — 16 个测试覆盖：
    - Shell 检测（Windows pwsh 存在/不存在、非 Windows、macOS、环境变量覆盖）。
    - 描述构建（pwsh、Windows bash、非 Windows）。
    - pwsh 适配命令引用存在且 Linux 原始引用不存在。

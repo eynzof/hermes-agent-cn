@@ -317,7 +317,7 @@ opening an upstream PR.
 3. **`model_tools.py`** — Cache invalidation:
    - Adds `_shell_fp` (current shell type) to `get_tool_definitions()` cache key. This ensures that a mid-session pwsh auto-install (which changes the terminal description) invalidates the cached tool definitions.
 
-4. **`tests/tools/test_terminal_dynamic_description.py`** — 14 tests covering:
+4. **`tests/tools/test_terminal_dynamic_description.py`** — 16 tests covering:
    - Shell detection (Windows pwsh found/not-found, non-Windows, macOS, env overrides).
    - Description building (pwsh, Windows bash, non-Windows).
    - pwsh-adapted command references present and Linux-only references absent.
