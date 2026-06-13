@@ -5845,6 +5845,83 @@ def _dispatch_all_via_service_manager_if_s6(action: str) -> bool:
 
 
 
+def _is_desktop_managed() -> bool:
+    """True when this CLI was spawned by the Hermes Desktop app.
+
+    The desktop sets ``HERMES_DESKTOP_MANAGED=1`` on the dashboard backend it
+    owns; that env propagates to the ``hermes gateway restart`` action the
+    dashboard spawns. We use it to keep the desktop from silently restarting a
+    *foreign* gateway (a pre-existing Windows service, or a second install)
+    that runs under a different ``HERMES_HOME`` and would never pick up the
+    channel params the desktop just saved (issue #168).
+    """
+    return os.environ.get("HERMES_DESKTOP_MANAGED") == "1"
+
+
+def _record_gateway_conflict_service() -> None:
+    """Mark that a foreign Windows gateway service is blocking a desktop start.
+
+    Surfaced to the desktop via the gateway runtime status so the messaging UI
+    can offer a one-click "force takeover" instead of a dead-end error.
+    """
+    try:
+        from gateway.status import set_gateway_conflict
+
+        set_gateway_conflict(
+            {
+                "kind": "service",
+                "can_takeover": True,
+                "message": (
+                    "检测到 Windows 上已安装的 Hermes 网关服务（非桌面端托管）。"
+                    "桌面端不会自动重启它，否则会用旧配置覆盖刚保存的参数。"
+                ),
+            }
+        )
+    except Exception:
+        pass
+
+
+def _free_conflicting_local_gateways() -> int:
+    """Terminate *local* gateways running under a different ``HERMES_HOME``.
+
+    Only invoked on an explicit desktop "force takeover". WSL/cross-VM gateways
+    are invisible to ``psutil`` here, so this only ever touches same-machine
+    processes; our own / same-home gateway is left to the ``--replace`` path.
+    Returns the number of processes signalled.
+    """
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return 0
+    our_home = str(get_hermes_home().resolve())
+    me = os.getpid()
+    patterns = ("gateway run", "gateway/run.py", "hermes gateway", "hermes-gateway")
+    killed = 0
+    for proc in psutil.process_iter(["pid", "cmdline", "environ"]):
+        try:
+            pid = proc.info.get("pid")
+            if pid in (None, me):
+                continue
+            cmdline = " ".join(proc.info.get("cmdline") or []).lower()
+            if not any(p in cmdline for p in patterns):
+                continue
+            env = proc.info.get("environ") or {}
+            home = env.get("HERMES_HOME")
+            if home:
+                try:
+                    if str(Path(home).resolve()) == our_home:
+                        continue  # our own / same-home gateway — handled by --replace
+                except Exception:
+                    pass
+            proc.terminate()
+            killed += 1
+        except Exception:
+            continue
+    if killed:
+        _wait_for_gateway_exit(timeout=8.0, force_after=4.0)
+    return killed
+
+
 def gateway_command(args):
     """Handle gateway subcommands."""
     try:
@@ -6397,19 +6474,53 @@ def _gateway_command_inner(args):
         elif is_windows():
             from hermes_cli import gateway_windows
 
-            # Prefer the Windows-specific restart path: it supports both
-            # registered Scheduled Task / Startup installs and no-service
-            # detached restarts.  In the normal successful Telegram-triggered
-            # restart flow, this avoids the generic foreground run_gateway()
-            # path that can be reaped with the old gateway process.  If the
-            # Windows backend raises, intentionally preserve the existing
-            # generic failure fallback below.
-            service_configured = gateway_windows.is_installed()
-            try:
-                gateway_windows.restart()
-                return
-            except (subprocess.CalledProcessError, RuntimeError, OSError):
-                pass
+            desktop_managed = _is_desktop_managed()
+            force_takeover = os.getenv("HERMES_GATEWAY_FORCE_TAKEOVER") == "1"
+            service_installed = gateway_windows.is_installed()
+
+            if desktop_managed and service_installed and not force_takeover:
+                # The desktop runs the gateway as a child of its dashboard and
+                # never installs a Windows service. An installed service is
+                # therefore a *foreign* gateway: restarting it would run under
+                # its own HERMES_HOME and never see the channel params the
+                # desktop just saved (issue #168). Surface a conflict the
+                # desktop can resolve with a one-click takeover instead of
+                # silently restarting the wrong gateway.
+                _record_gateway_conflict_service()
+                print_error(
+                    "检测到已安装的 Windows Hermes 网关服务（非桌面端托管）。\n"
+                    "  已拒绝重启该外部网关，否则会用旧配置覆盖刚保存的参数。\n"
+                    "  在桌面端点击「强制由桌面端接管并重启」，或先停止该服务："
+                    "  hermes gateway service uninstall"
+                )
+                sys.exit(2)
+
+            if desktop_managed:
+                # Explicit takeover: stop the foreign service + any other local
+                # gateway under a different HERMES_HOME, then run a
+                # desktop-managed gateway via the manual --replace path below.
+                if force_takeover:
+                    if service_installed:
+                        try:
+                            gateway_windows.stop()
+                        except (subprocess.CalledProcessError, RuntimeError, OSError):
+                            pass
+                    _free_conflicting_local_gateways()
+                service_configured = False
+            else:
+                # Prefer the Windows-specific restart path: it supports both
+                # registered Scheduled Task / Startup installs and no-service
+                # detached restarts.  In the normal successful Telegram-triggered
+                # restart flow, this avoids the generic foreground run_gateway()
+                # path that can be reaped with the old gateway process.  If the
+                # Windows backend raises, intentionally preserve the existing
+                # generic failure fallback below.
+                service_configured = service_installed
+                try:
+                    gateway_windows.restart()
+                    return
+                except (subprocess.CalledProcessError, RuntimeError, OSError):
+                    pass
 
         if not service_available:
             # systemd/launchd restart failed — check if linger is the issue
@@ -6448,9 +6559,21 @@ def _gateway_command_inner(args):
 
             _wait_for_gateway_exit(timeout=10.0, force_after=5.0)
 
+            # A desktop-managed start takes over its own stale gateway (and any
+            # we just freed during a force-takeover) via --replace, and clears
+            # any lingering conflict marker now that we're starting our own.
+            desktop_managed = _is_desktop_managed()
+            if desktop_managed:
+                try:
+                    from gateway.status import set_gateway_conflict
+
+                    set_gateway_conflict(None)
+                except Exception:
+                    pass
+
             # Start fresh
             print("Starting gateway...")
-            run_gateway(verbose=0)
+            run_gateway(verbose=0, replace=desktop_managed)
 
     elif subcmd == "status":
         deep = getattr(args, "deep", False)

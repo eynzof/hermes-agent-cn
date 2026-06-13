@@ -13,10 +13,10 @@ When the manifest is unreachable (offline, network blocked, hosting failure), He
 ## Live manifest URL
 
 ```
-https://hermes-agent.nousresearch.com/docs/api/model-catalog.json
+https://desktop.hermesagent.org.cn/api/model-catalog.json
 ```
 
-Published on every merge to `main` via the existing `deploy-site.yml` GitHub Pages pipeline. The source of truth lives in the repo at `website/static/api/model-catalog.json`.
+Published through the Hermes CN Desktop landing site mirror. The source of truth lives in this repo at `website/static/api/model-catalog.json`, then the landing repository mirrors it to `public/api/model-catalog.json`.
 
 ## Schema
 
@@ -68,7 +68,7 @@ Cache location: `~/.hermes/cache/model_catalog.json`.
 ```yaml
 model_catalog:
   enabled: true
-  url: https://hermes-agent.nousresearch.com/docs/api/model-catalog.json
+  url: https://desktop.hermesagent.org.cn/api/model-catalog.json
   ttl_hours: 24
   providers: {}
 ```
@@ -98,6 +98,6 @@ Maintainers:
 python scripts/build_model_catalog.py
 ```
 
-Then PR the resulting change to `website/static/api/model-catalog.json` to `main`. The docs site auto-deploys on merge and the new manifest is live within a few minutes.
+Then PR the resulting change to `website/static/api/model-catalog.json` to `main`, and mirror the same JSON into `hermes-agent-cn-desktop-landing/public/api/model-catalog.json`.
 
 You can also hand-edit the JSON directly for fine-grained metadata changes that don't belong in the in-repo snapshot — the generator script is a convenience, not the single source of truth.

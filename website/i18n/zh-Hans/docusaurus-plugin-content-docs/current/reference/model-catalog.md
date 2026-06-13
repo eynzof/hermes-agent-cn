@@ -13,10 +13,10 @@ Hermes 从托管于文档站点旁的 JSON 清单中获取 **OpenRouter** 和 **
 ## 线上清单 URL
 
 ```
-https://hermes-agent.nousresearch.com/docs/api/model-catalog.json
+https://desktop.hermesagent.org.cn/api/model-catalog.json
 ```
 
-每次合并到 `main` 时，通过现有的 `deploy-site.yml` GitHub Pages 流水线发布。真实来源位于仓库的 `website/static/api/model-catalog.json`。
+通过 Hermes CN Desktop 官网镜像发布。真实来源位于本仓库的 `website/static/api/model-catalog.json`，然后由 landing 仓库镜像到 `public/api/model-catalog.json`。
 
 ## Schema（模式）
 
@@ -68,7 +68,7 @@ https://hermes-agent.nousresearch.com/docs/api/model-catalog.json
 ```yaml
 model_catalog:
   enabled: true
-  url: https://hermes-agent.nousresearch.com/docs/api/model-catalog.json
+  url: https://desktop.hermesagent.org.cn/api/model-catalog.json
   ttl_hours: 24
   providers: {}
 ```
@@ -98,6 +98,6 @@ model_catalog:
 python scripts/build_model_catalog.py
 ```
 
-然后将 `website/static/api/model-catalog.json` 的变更提交 PR 到 `main`。文档站点在合并后自动部署，新清单将在几分钟内生效。
+然后将 `website/static/api/model-catalog.json` 的变更提交 PR 到 `main`，并把同一份 JSON 镜像到 `hermes-agent-cn-desktop-landing/public/api/model-catalog.json`。
 
 你也可以直接手动编辑 JSON，用于不适合放入仓库内置快照的细粒度元数据变更——生成脚本只是便捷工具，并非唯一的真实来源。

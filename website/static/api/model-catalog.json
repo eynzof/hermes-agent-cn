@@ -2,8 +2,8 @@
   "version": 1,
   "updated_at": "2026-06-04T23:57:51Z",
   "metadata": {
-    "source": "hermes-agent repo",
-    "docs": "https://hermes-agent.nousresearch.com/docs/reference/model-catalog"
+    "source": "Hermes-CN-Core repo",
+    "docs": "https://github.com/Eynzof/Hermes-CN-Core/blob/main/website/docs/reference/model-catalog.md"
   },
   "providers": {
     "openrouter": {

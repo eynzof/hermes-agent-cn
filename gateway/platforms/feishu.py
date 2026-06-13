@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import errno
 import hashlib
 import hmac
 import itertools
@@ -200,6 +201,31 @@ _DEFAULT_DEDUP_CACHE_SIZE = 2048
 _DEFAULT_WEBHOOK_HOST = "127.0.0.1"
 _DEFAULT_WEBHOOK_PORT = 8765
 _DEFAULT_WEBHOOK_PATH = "/feishu/webhook"
+
+# Windows surfaces "address already in use" as WSAEADDRINUSE (10048) rather than
+# the POSIX EADDRINUSE (98); accept both.
+_ADDRESS_IN_USE_ERRNOS = {errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", 10048)}
+
+
+def _classify_address_in_use(exc: BaseException, port: int) -> Optional[dict]:
+    """Return structured conflict detail if ``exc`` is an address-in-use error.
+
+    Walks the exception chain (aiohttp/asyncio wrap the underlying ``OSError``)
+    looking for an ``EADDRINUSE``/``WSAEADDRINUSE`` errno. Returns ``None`` when
+    the failure is something else, so callers fall back to the generic error.
+    """
+    seen: set[int] = set()
+    cur: Optional[BaseException] = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        err_no = getattr(cur, "errno", None)
+        win_err = getattr(cur, "winerror", None)
+        if err_no in _ADDRESS_IN_USE_ERRNOS or win_err == 10048:
+            from gateway.status import classify_port_conflict
+
+            return classify_port_conflict(port)
+        cur = cur.__cause__ or cur.__context__
+    return None
 # ---------------------------------------------------------------------------
 # TTL, rate-limit and webhook security constants
 # ---------------------------------------------------------------------------
@@ -1673,7 +1699,16 @@ class FeishuAdapter(BasePlatformAdapter):
                     + " Stop the other gateway before starting a second Feishu websocket client."
                 )
                 logger.error("[Feishu] %s", message)
-                self._set_fatal_error("feishu_app_lock", message, retryable=False)
+                self._set_fatal_error(
+                    "feishu_app_lock",
+                    message,
+                    retryable=False,
+                    error_detail={
+                        "kind": "app_lock",
+                        "can_takeover": False,
+                        "owner_pid": owner_pid,
+                    },
+                )
                 return False
 
             self._loop = asyncio.get_running_loop()
@@ -1683,8 +1718,30 @@ class FeishuAdapter(BasePlatformAdapter):
             return True
         except Exception as exc:
             await self._release_app_lock()
+            # A webhook-mode bind that hits "address already in use" almost always
+            # means a *second* Hermes Agent (another Windows install, or one in
+            # WSL reachable over the shared loopback) already holds the port.
+            # Classify it so the desktop can show a targeted conflict prompt with
+            # a "force takeover" action when the owner is a local process.
+            conflict = _classify_address_in_use(exc, self._webhook_port)
+            if conflict is not None:
+                message = (
+                    "飞书消息服务无法启动：端口 "
+                    f"{self._webhook_port} 已被另一个 Hermes Agent 占用。"
+                    f"（{exc}）"
+                )
+                self._set_fatal_error(
+                    "gateway_conflict_port",
+                    message,
+                    retryable=True,
+                    error_detail=conflict,
+                )
+                logger.error(
+                    "[Feishu] Webhook port %s already in use: %s", self._webhook_port, exc, exc_info=True
+                )
+                return False
             message = f"Feishu startup failed: {exc}"
-            self._set_fatal_error("feishu_connect_error", message, retryable=True)
+            self._set_fatal_error("feishu_connect_error", message, retryable=True, error_detail=None)
             logger.error("[Feishu] Failed to connect: %s", exc, exc_info=True)
             return False
 
