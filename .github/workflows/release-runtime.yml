@@ -146,7 +146,7 @@ jobs:
           for m in ("mcp", "lark_oapi", "dingtalk_stream", "alibabacloud_dingtalk",
                     "alibabacloud_tea_openapi", "alibabacloud_tea_util",
                     "aiohttp", "qrcode", "defusedxml", "certifi", "typer",
-                    "hindsight_client"):
+                    "hindsight_client", "hindsight_client_api", "aiohttp_retry"):
               try:
                   importlib.import_module(m)
               except Exception as e:
@@ -226,6 +226,8 @@ jobs:
             --collect-submodules certifi \
             --collect-submodules typer \
             --collect-submodules hindsight_client \
+            --collect-submodules hindsight_client_api \
+            --collect-submodules aiohttp_retry \
             --collect-data hermes_cli \
             --collect-data gateway \
             --collect-data plugins \
@@ -242,6 +244,7 @@ jobs:
             --copy-metadata mcp \
             --copy-metadata typer \
             --copy-metadata hindsight-client \
+            --copy-metadata aiohttp-retry \
             --copy-metadata lark_oapi \
             --copy-metadata dingtalk_stream \
             --copy-metadata alibabacloud_dingtalk \
@@ -343,7 +346,7 @@ jobs:
                      alibabacloud_tea darabonba_core requests_toolbelt \
                      aiohttp websockets apscheduler aiofiles qrcode pypng \
                      defusedxml cryptography pycryptodome certifi \
-                     hindsight_client; do
+                     hindsight_client hindsight_client_api aiohttp_retry; do
             if [[ -z "$(find "$internal" -maxdepth 1 -type d -name "${pkg}-*.dist-info" -print -quit)" ]]; then
               echo "::error::Frozen runtime is missing ${pkg} package metadata" >&2
               find "dist/$NAME" -maxdepth 3 -type d -iname "${pkg}*" -print >&2

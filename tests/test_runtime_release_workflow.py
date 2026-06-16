@@ -4,7 +4,7 @@ The desktop runtime is a frozen PyInstaller executable, so it CANNOT
 lazy-install dependencies at first use (no working pip inside the binary).
 Every backend the desktop exposes must therefore be pre-baked via the
 ``cn-desktop`` aggregate extra and collected by PyInstaller. These tests pin
-that contract so a backend can't silently drop out of the build again — the
+that contract so a backend can't silently drop out of the build again —?the
 failure mode behind issue #16 (MCP) and the 飞书/钉钉/企微/微信 desktop reports.
 """
 
@@ -62,7 +62,7 @@ def test_cn_desktop_extra_bundles_every_desktop_backend():
     # Aggregated sub-extras
     for sub in ("web", "anthropic", "mcp", "feishu", "dingtalk", "wecom"):
         assert f"[{sub}]" in blob, f"cn-desktop is missing the {sub} extra"
-    # 微信 (weixin) has no dedicated extra — its adapter deps are listed directly
+    # 微信 (weixin) has no dedicated extra —?its adapter deps are listed directly
     assert any(e.startswith("aiohttp") for e in extra), "cn-desktop missing aiohttp (微信/feishu/wecom)"
     assert any(e.startswith("qrcode") for e in extra), "cn-desktop missing qrcode (scan-login)"
     assert any(e.startswith("cryptography") for e in extra), "cn-desktop missing cryptography (微信/wecom AES)"
@@ -87,7 +87,7 @@ def test_runtime_workflow_freezes_native_mcp_client():
 
 
 def test_runtime_workflow_freezes_im_platform_backends():
-    """飞书/钉钉/企微/微信 adapters must ship — they can't lazy-install frozen."""
+    """飞书/钉钉/企微/微信 adapters must ship —?they can't lazy-install frozen."""
     workflow = _workflow_text()
     # Feishu / DingTalk SDKs collected by PyInstaller
     for mod in ("lark_oapi", "dingtalk_stream", "alibabacloud_dingtalk"):
@@ -159,6 +159,106 @@ def test_runtime_workflow_freezes_hindsight_client_for_long_term_memory():
     assert "hindsight_client" in verified, (
         "frozen-output verify list does not assert hindsight_client dist-info"
     )
+
+def test_runtime_workflow_freezes_hindsight_client_api_and_aiohttp_retry():
+    """hindsight-client==0.6.1 ships hindsight_client_api as a bundled top-level
+    package and depends on aiohttp-retry as an independent distribution. The
+    previous PR (#39 round 1) only collected hindsight_client itself, which
+    proved insufficient in a real frozen runtime smoke test: the recall tool
+    returned HTTP 500 with
+        No module named 'hindsight_client_api'
+    after the first round, and
+        No module named 'aiohttp_retry'
+    after the second round. Both transitive pieces must be explicitly
+    collected and the independent aiohttp-retry dist-info must be copied.
+    """
+    workflow = _workflow_text()
+    extra = _cn_desktop_extra()
+
+    # 1. cn-desktop extra still pulls in [hindsight] (round 1 contract).
+    assert any("[hindsight]" in e for e in extra)
+
+    # 2. Build-env import smoke test must cover all three modules.
+    text = workflow
+    start = text.index("for m in (") + len("for m in (")
+    body = text[start : text.index("):", start)]
+    import_list = body.replace("\n", " ").replace('"', " ").split()
+    for mod in ("hindsight_client", "hindsight_client_api", "aiohttp_retry"):
+        assert mod in import_list, (
+            f"release-runtime.yml build-env import smoke test does not "
+            f"check {mod}; PyInstaller may bundle a missing dependency."
+        )
+
+    # 3. PyInstaller must collect all three submodules.
+    #    hindsight_client_api is bundled inside the same wheel as
+    #    hindsight_client (verified by importlib.metadata.packages_distributions()
+    #    mapping both modules to the same "hindsight-client" distribution) but
+    #    PyInstaller static analysis does not automatically pick up sibling
+    #    top-level packages, so it must be named explicitly.
+    for mod in ("hindsight_client", "hindsight_client_api", "aiohttp_retry"):
+        assert f"--collect-submodules {mod}" in workflow, (
+            f"PyInstaller invocation missing --collect-submodules {mod}"
+        )
+
+    # 4. PyInstaller must copy the independent dist-info.
+    #    - hindsight-client: required (covers hindsight_client + hindsight_client_api)
+    #    - aiohttp-retry: required (independent distribution)
+    #    - hindsight-client-api: NOT a real distribution, must NOT be added
+    assert "--copy-metadata hindsight-client" in workflow, (
+        "PyInstaller invocation missing --copy-metadata hindsight-client"
+    )
+    assert "--copy-metadata aiohttp-retry" in workflow, (
+        "PyInstaller invocation missing --copy-metadata aiohttp-retry "
+        "(aiohttp-retry is an independent distribution, not bundled inside "
+        "hindsight-client)"
+    )
+    assert "--copy-metadata hindsight-client-api" not in workflow, (
+        "release-runtime.yml must NOT pass --copy-metadata hindsight-client-api: "
+        "hindsight_client_api has no independent distribution metadata; it "
+        "shares hindsight_client-*.dist-info with the main hindsight_client "
+        "package (verified via importlib.metadata.packages_distributions()). "
+        "Adding a non-existent --copy-metadata is a build-time typo."
+    )
+
+    # 5. Frozen-output verify list must assert the dist-info directory of
+    #    every independent distribution. aiohttp_retry is independent, so
+    #    its aiohttp_retry-*.dist-info must be asserted; hindsight_client_api
+    #    shares the hindsight_client-*.dist-info, so the single hindsight_client
+    #    entry already covers it.
+    verified = _frozen_verify_packages()
+    for pkg in ("hindsight_client", "aiohttp_retry"):
+        assert pkg in verified, (
+            f"frozen-output verify list does not assert {pkg} dist-info"
+        )
+
+
+def test_runtime_workflow_hindsight_transitive_deps_match_importlib_metadata():
+    """The PR three-module coverage must match what
+    importlib.metadata.packages_distributions() reports for each module.
+
+    This guards against adding a collect line for a module that the upstream
+    wheel does not actually ship, or missing a real transitive. It is a
+    textual contract test, not a PyInstaller runtime test (the cross-platform
+    PyInstaller build is exercised by CI, not by this unit suite).
+    """
+    # Pure-Python introspection of the wheel: pin the contract that
+    # hindsight-client==0.6.1 ships both hindsight_client and
+    # hindsight_client_api as top-level packages, and that aiohttp-retry
+    # is an independent distribution whose module name is aiohttp_retry.
+    try:
+        from importlib.metadata import packages_distributions
+    except ImportError:  # pragma: no cover - py<3.10
+        pytest.skip("importlib.metadata.packages_distributions requires py>=3.10")
+    pd = packages_distributions()
+    # These are the exact module->distribution mappings the build must
+    # respect. If the upstream wheel ever changes its bundling (e.g. splits
+    # hindsight_client_api into a separate distribution), this test fails
+    # and forces an explicit re-evaluation of which --copy-metadata lines
+    # the workflow needs.
+    assert "hindsight-client" in pd.get("hindsight_client", [])
+    assert "hindsight-client" in pd.get("hindsight_client_api", [])
+    assert "aiohttp-retry" in pd.get("aiohttp_retry", [])
+
 
 def test_runtime_workflow_signs_and_preserves_macos_frameworks():
     workflow = _workflow_text()
