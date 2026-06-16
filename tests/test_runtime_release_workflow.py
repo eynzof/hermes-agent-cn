@@ -114,6 +114,52 @@ def test_runtime_workflow_verifies_backends_in_build_env_and_frozen_output():
     assert ".dist-info" in workflow
 
 
+def test_runtime_workflow_freezes_hindsight_client_for_long_term_memory():
+    """The CN desktop frozen runtime pre-bakes the Hindsight memory client.
+
+    mirrors test_runtime_workflow_freezes_native_mcp_client: cn-desktop extra
+    pulls in [hindsight], the PyInstaller build collects hindsight_client and
+    copies its dist metadata, and the frozen-output verify step asserts the
+    hindsight_client-*.dist-info directory is present. A missing piece here
+    means hermes_recall/reflect/retain fail with ``ModuleNotFoundError`` inside
+    the frozen binary (issue: hindsight-client not in PyInstaller bundle).
+    """
+    workflow = _workflow_text()
+    extra = _cn_desktop_extra()
+
+    # 1. cn-desktop must transitively pull in the [hindsight] sub-extra.
+    assert any("[hindsight]" in e for e in extra), (
+        "cn-desktop extra is missing hermes-agent[hindsight] "
+        "(frozen runtime cannot lazy-install hindsight-client)"
+    )
+
+    # 2. Build-env import smoke test must include hindsight_client.
+    #    Re-parse the same for-tuple the existing helper does, so a future
+    #    re-shuffle of the import list still keeps this assertion honest.
+    text = workflow
+    start = text.index("for m in (") + len("for m in (")
+    body = text[start : text.index("):", start)]
+    import_list = body.replace("\n", " ").replace('"', " ").split()
+    assert "hindsight_client" in import_list, (
+        "release-runtime.yml build-env import smoke test does not "
+        "check hindsight_client; PyInstaller may bundle a missing SDK."
+    )
+
+    # 3. PyInstaller collect / metadata lines.
+    assert "--collect-submodules hindsight_client" in workflow, (
+        "PyInstaller invocation missing --collect-submodules hindsight_client"
+    )
+    assert "--copy-metadata hindsight-client" in workflow, (
+        "PyInstaller invocation missing --copy-metadata hindsight-client "
+        "(pip distribution name with hyphen, not the underscored module name)"
+    )
+
+    # 4. Frozen-output verify list must assert the dist-info directory.
+    verified = _frozen_verify_packages()
+    assert "hindsight_client" in verified, (
+        "frozen-output verify list does not assert hindsight_client dist-info"
+    )
+
 def test_runtime_workflow_signs_and_preserves_macos_frameworks():
     workflow = _workflow_text()
 
