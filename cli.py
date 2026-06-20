@@ -3699,6 +3699,95 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         self._background_tasks: Dict[str, threading.Thread] = {}
         self._background_task_counter = 0
 
+    def _console_print(self, *args, **kwargs) -> None:
+        """Print through the active Rich console with a safe fallback.
+
+        Several CLI paths are exercised in tests via ``HermesCLI.__new__`` or
+        prompt_toolkit stubs, so this helper must tolerate a partially
+        initialised instance and a missing ``self.console``.
+        """
+        console = getattr(self, "console", None)
+        if console is not None and hasattr(console, "print"):
+            console.print(*args, **kwargs)
+            return
+        ChatConsole().print(*args, **kwargs)
+
+    def _new_session_id(self) -> str:
+        timestamp_str = self.session_start.strftime("%Y%m%d_%H%M%S")
+        short_uuid = uuid.uuid4().hex[:6]
+        return f"{timestamp_str}_{short_uuid}"
+
+    def new_session(self, title: str | None = None, *, silent: bool = False) -> str:
+        """Start a fresh CLI session and emit session-boundary hooks."""
+        old_agent = getattr(self, "agent", None)
+        old_session_id = (
+            getattr(old_agent, "session_id", None)
+            or getattr(self, "session_id", None)
+        )
+        if old_session_id:
+            _notify_session_finalize(
+                session_id=old_session_id,
+                platform="cli",
+                reason="reset",
+            )
+
+        self.agent = None
+        self.conversation_history = []
+        self.session_start = datetime.now()
+        self.session_id = self._new_session_id()
+        self._resumed = False
+        self._pending_title = title
+        self._prompt_start_time = None
+        self._prompt_duration = 0.0
+        self._last_turn_finished_at = None
+        self._last_turn_interrupted = False
+        self._pending_agent_seed = None
+
+        try:
+            from hermes_cli.plugins import invoke_hook as _invoke_hook
+
+            _invoke_hook(
+                "on_session_reset",
+                session_id=self.session_id,
+                platform="cli",
+                title=title,
+            )
+        except Exception:
+            pass
+
+        if not silent:
+            self._console_print(
+                f"[dim]Started new session: {_escape(self.session_id)}[/]"
+            )
+        return self.session_id
+
+    def retry_last(self) -> Optional[Any]:
+        """Remove the last user turn and return its original message."""
+        history = getattr(self, "conversation_history", None) or []
+        for index in range(len(history) - 1, -1, -1):
+            if history[index].get("role") == "user":
+                message = history[index].get("content")
+                self.conversation_history = history[:index]
+                return message
+        return None
+
+    def _should_handle_steer_command_inline(
+        self,
+        text: str,
+        *,
+        has_images: bool = False,
+    ) -> bool:
+        """Return True when ``/steer`` should bypass the pending-input queue."""
+        if has_images or not getattr(self, "_agent_running", False):
+            return False
+        if not isinstance(text, str):
+            return False
+        stripped = text.strip()
+        if not stripped.startswith("/"):
+            return False
+        head = stripped.split(None, 1)[0].lower().lstrip("/")
+        return head == "steer"
+
     def _claim_active_session(self, surface: str = "cli", *, stderr: bool = False) -> bool:
         """Claim a global active-session slot for this CLI process."""
         if self._active_session_lease is not None:
