@@ -1312,26 +1312,6 @@ def handle_function_call(
     Returns:
         Function result as a JSON string.
     """
-    # Repair common LLM field-name drift (e.g. "file"→"path") before coercion
-    repaired_args = repair_tool_arg_keys(function_name, function_args)
-    if repaired_args != function_args:
-        logger.info(
-            "Repaired tool argument keys for %s: %s -> %s",
-            function_name, list(function_args.keys()), list(repaired_args.keys()),
-        )
-        # Note: the callback reports top-level key changes only. Nested key
-        # repairs inside objects/arrays are not reported through this hook.
-        if _arg_repair_callback is not None:
-            try:
-                _arg_repair_callback(
-                    function_name,
-                    list(function_args.keys()),
-                    list(repaired_args.keys()),
-                )
-            except Exception:
-                pass  # Never let callback failure break tool dispatch
-    function_args = repaired_args
-
     # Coerce string arguments to their schema-declared types (e.g. "42"→42)
     function_args = coerce_tool_args(function_name, function_args)
     if not isinstance(function_args, dict):
@@ -1432,6 +1412,31 @@ def handle_function_call(
             _tool_middleware_trace = _tool_request_mw.trace
         except Exception as _mw_err:
             logger.debug("tool_request middleware error: %s", _mw_err)
+
+    if not _tool_middleware_trace:
+        # Repair common LLM field-name drift (e.g. "file"→"path") after the
+        # request middleware seam.  Middleware must see and may intentionally
+        # preserve the model's original payload shape; when no middleware has
+        # rewritten the request we canonicalize before hooks/dispatch so legacy
+        # observers and tool handlers still receive schema field names.
+        repaired_args = repair_tool_arg_keys(function_name, function_args)
+        if repaired_args != function_args:
+            logger.info(
+                "Repaired tool argument keys for %s: %s -> %s",
+                function_name, list(function_args.keys()), list(repaired_args.keys()),
+            )
+            # Note: the callback reports top-level key changes only. Nested key
+            # repairs inside objects/arrays are not reported through this hook.
+            if _arg_repair_callback is not None:
+                try:
+                    _arg_repair_callback(
+                        function_name,
+                        list(function_args.keys()),
+                        list(repaired_args.keys()),
+                    )
+                except Exception:
+                    pass  # Never let callback failure break tool dispatch
+        function_args = coerce_tool_args(function_name, repaired_args)
 
     try:
         if function_name in _AGENT_LOOP_TOOLS:

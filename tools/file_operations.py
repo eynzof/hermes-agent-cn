@@ -2191,7 +2191,13 @@ class ShellFileOperations(FileOperations):
         # path, producing ``rg . <path> --files --glob …`` which is invalid.
         cmd = rg.command + [path]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                stdin=subprocess.DEVNULL,
+            )
         except Exception:  # noqa: BLE001
             return self._search_files_rg_shell(pattern, path, limit, offset)
 
@@ -2202,7 +2208,11 @@ class ShellFileOperations(FileOperations):
             cmd_unsorted = rg_unsorted.command + [path]
             try:
                 proc = subprocess.run(
-                    cmd_unsorted, capture_output=True, text=True, timeout=60
+                    cmd_unsorted,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    stdin=subprocess.DEVNULL,
                 )
             except Exception:  # noqa: BLE001
                 return self._search_files_rg_shell(pattern, path, limit, offset)
@@ -2326,7 +2336,11 @@ class ShellFileOperations(FileOperations):
         full_cmd = list(rg.command) + [rg.regex_pattern, rg.path]
         try:
             proc = subprocess.run(
-                full_cmd, capture_output=True, text=True, timeout=60
+                full_cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                stdin=subprocess.DEVNULL,
             )
         except Exception:  # noqa: BLE001
             return self._search_with_rg_shell(
