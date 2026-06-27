@@ -518,6 +518,10 @@ opening an upstream PR.
 
 **Should we upstream?** Yes. This completes the migration P-016 started and makes Hermes a zero-dependency Windows citizen.
 
+**Sync note (2026-06-27, `chore/sync-upstream-20260627`)**: upstream periodically re-introduces Git Bash machinery on `main`. This sync's `upstream/main` restored the 7-strategy `_find_bash()` in `tools/environments/local.py`, the static terminal description in `tools/terminal_tool.py`, and Git-Bash wording in `website/docs/developer-guide/contributing.md`. The sync **re-asserted P-016/P-019** — kept the fork's PowerShell-only path and grafted only upstream's *independent* fixes on top: `_find_shell()`'s `$SHELL`-preference for POSIX background spawning (#42203, adapted to call the fork's `_find_bash_posix()`); `start_new_session`; install-dir PATH reachability; and in `apps/desktop/electron/main.cjs` the no-console-python helpers (`getNoConsoleVenvPython`/`toNoConsolePython`/`applyWindowsNoConsoleSpawnHints`/`unwrapWindowsVenvHermesCommand`) combined with the fork's async backend resolution (the probes are `async`, so the fork's `await` is required). Future syncs should expect the same Git-Bash drift and resolve the same way.
+
+**`cli.py` decomposition cleanup (2026-06-27)**: a prior sync had left a large block of methods "restored from upstream CLI decomposition" inline in `HermesCLI`. Upstream now provides those methods via `CLICommandsMixin` / `CLIAgentSetupMixin` (which `HermesCLI` inherits), so this sync dropped the redundant inline copies in favour of upstream's structure (per MAINTAINING.md "if upstream added an equivalent feature, remove the local fork implementation"). The only genuine fork change re-applied to `cli.py` was the P-019 rename; the unused `_new_session_id` helper (0 callers) was dropped.
+
 ---
 
 ### P-024: Empty-content message filtering in `sanitize_api_messages`
