@@ -12242,6 +12242,92 @@ def _build_probe_url_candidates(base_url: str) -> list[str]:
     return candidates
 
 
+def _fetch_provider_model_ids(
+    base_url: str, api_key: str, timeout_s: float
+) -> dict:
+    """GET the first responding /models candidate and parse its model ids.
+
+    Shared by ``provider.probe`` (connectivity test, samples 5) and
+    ``provider.models`` (refresh picker, full list). Returns a normalized dict::
+
+        {ok, model_ids, status_code, latency_ms, error, error_kind}
+
+    ``api_key`` may be empty — local servers (Ollama, LM Studio) need none, so
+    the Authorization header is only attached when a key is present. Failures
+    are returned as data (never raised) so callers wrap them in an ``_ok``
+    envelope and the UI can branch on ``error_kind``.
+    """
+    import time
+    import httpx
+
+    candidates = _build_probe_url_candidates(base_url)
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    timeout_ms = int(timeout_s * 1000)
+    last_status: int | None = None
+    last_error: str | None = None
+
+    for url in candidates:
+        try:
+            start = time.monotonic()
+            resp = httpx.get(url, headers=headers, timeout=timeout_s)
+            latency_ms = int((time.monotonic() - start) * 1000)
+
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {}
+                raw_models = data.get("data", []) if isinstance(data, dict) else []
+                model_ids = [
+                    str(m.get("id", "")).strip()
+                    for m in raw_models
+                    if isinstance(m, dict) and m.get("id")
+                ]
+                return {
+                    "ok": True,
+                    "model_ids": model_ids,
+                    "status_code": 200,
+                    "latency_ms": latency_ms,
+                    "error": None,
+                    "error_kind": None,
+                }
+
+            last_status = resp.status_code
+            # Auth failures are terminal — no point trying other URL patterns
+            # since they'd return the same 401/403.
+            if resp.status_code in (401, 403):
+                return {
+                    "ok": False,
+                    "model_ids": [],
+                    "status_code": resp.status_code,
+                    "latency_ms": latency_ms,
+                    "error": f"API key rejected (HTTP {resp.status_code})",
+                    "error_kind": "auth",
+                }
+            # 404 / 405 → try next candidate URL
+            last_error = f"HTTP {resp.status_code}"
+        except httpx.TimeoutException:
+            return {
+                "ok": False,
+                "model_ids": [],
+                "status_code": None,
+                "latency_ms": timeout_ms,
+                "error": f"timed out after {timeout_ms}ms",
+                "error_kind": "timeout",
+            }
+        except httpx.HTTPError as e:
+            last_error = str(e) or "network error"
+
+    return {
+        "ok": False,
+        "model_ids": [],
+        "status_code": last_status,
+        "latency_ms": 0,
+        "error": last_error or "no /models endpoint responded",
+        "error_kind": "http" if last_status else "network",
+    }
+
+
 @method("provider.probe")
 def _(rid, params: dict) -> dict:
     """Lightweight connectivity check against a provider's /models endpoint.
@@ -12260,9 +12346,6 @@ def _(rid, params: dict) -> dict:
     are *data*, not RPC errors, so the UI can branch on error_kind without
     JSON-RPC plumbing).
     """
-    import time
-    import httpx
-
     try:
         from hermes_cli.auth import PROVIDER_REGISTRY
 
@@ -12304,82 +12387,83 @@ def _(rid, params: dict) -> dict:
         except (TypeError, ValueError):
             timeout_ms = 5000
         timeout_ms = max(1000, min(timeout_ms, 30000))
-        timeout_s = timeout_ms / 1000.0
 
-        candidates = _build_probe_url_candidates(base_url)
-        last_status: int | None = None
-        last_error: str | None = None
-
-        for url in candidates:
-            try:
-                start = time.monotonic()
-                resp = httpx.get(
-                    url,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=timeout_s,
-                )
-                latency_ms = int((time.monotonic() - start) * 1000)
-
-                if resp.status_code == 200:
-                    try:
-                        data = resp.json()
-                    except Exception:
-                        data = {}
-                    raw_models = data.get("data", []) if isinstance(data, dict) else []
-                    model_ids = [
-                        str(m.get("id", "")).strip()
-                        for m in raw_models
-                        if isinstance(m, dict) and m.get("id")
-                    ]
-                    return _ok(rid, {
-                        "ok": True,
-                        "latency_ms": latency_ms,
-                        "model_count": len(model_ids),
-                        "sample_models": model_ids[:5],
-                        "status_code": 200,
-                        "error": None,
-                        "error_kind": None,
-                    })
-
-                last_status = resp.status_code
-                # Auth failures are terminal — no point trying other URL
-                # patterns since they'd return the same 401/403.
-                if resp.status_code in (401, 403):
-                    return _ok(rid, {
-                        "ok": False,
-                        "latency_ms": latency_ms,
-                        "model_count": 0,
-                        "sample_models": [],
-                        "status_code": resp.status_code,
-                        "error": f"API key rejected (HTTP {resp.status_code})",
-                        "error_kind": "auth",
-                    })
-                # 404 / 405 → try next candidate URL
-                last_error = f"HTTP {resp.status_code}"
-            except httpx.TimeoutException:
-                return _ok(rid, {
-                    "ok": False,
-                    "latency_ms": timeout_ms,
-                    "model_count": 0,
-                    "sample_models": [],
-                    "status_code": None,
-                    "error": f"timed out after {timeout_ms}ms",
-                    "error_kind": "timeout",
-                })
-            except httpx.HTTPError as e:
-                last_error = str(e) or "network error"
-
+        result = _fetch_provider_model_ids(base_url, api_key, timeout_ms / 1000.0)
+        model_ids = result["model_ids"]
         return _ok(rid, {
-            "ok": False,
-            "latency_ms": 0,
-            "model_count": 0,
-            "sample_models": [],
-            "status_code": last_status,
-            "error": last_error or "no /models endpoint responded",
-            "error_kind": "http" if last_status else "network",
+            "ok": result["ok"],
+            "latency_ms": result["latency_ms"],
+            "model_count": len(model_ids),
+            "sample_models": model_ids[:5],
+            "status_code": result["status_code"],
+            "error": result["error"],
+            "error_kind": result["error_kind"],
         })
     except Exception as e:
         return _err(rid, 5042, str(e))
+
+
+@method("provider.models")
+def _(rid, params: dict) -> dict:
+    """Full model-id list for a provider's /models endpoint (refresh picker).
+
+    Like ``provider.probe`` but returns the *complete* list (probe only samples
+    5) and tolerates an empty api_key — local servers (Ollama, LM Studio,
+    vLLM) need none. The desktop's model picker calls this through the gateway
+    instead of fetching the LAN endpoint directly, so a self-hosted provider on
+    a private IP (e.g. http://192.168.x.x:11434/v1) is reachable from the
+    backend rather than being blocked by the desktop's external-request SSRF
+    guard.
+
+    Params:
+        provider: provider slug (e.g. "deepseek"); only used for env-var/base
+            fallback, so custom providers may pass any non-empty placeholder.
+        api_key: optional override; falls back to PROVIDER_REGISTRY env var.
+        base_url: optional override; falls back to PROVIDER_REGISTRY default.
+        timeout_ms: optional, default 8000, clamped 1000-30000.
+
+    Returns (always _ok envelope; failures are data, not RPC errors)::
+
+        {ok, models, model_count, status_code, error, error_kind}
+    """
+    try:
+        from hermes_cli.auth import PROVIDER_REGISTRY
+
+        provider = str(params.get("provider", "")).strip()
+        if not provider:
+            return _err(rid, 5043, "provider parameter is required")
+
+        api_key = str(params.get("api_key", "")).strip()
+        pconfig = PROVIDER_REGISTRY.get(provider)
+        if not api_key and pconfig and pconfig.api_key_env_vars:
+            for env_var in pconfig.api_key_env_vars:
+                api_key = os.getenv(env_var, "").strip()
+                if api_key:
+                    break
+
+        base_url = str(params.get("base_url", "")).strip().rstrip("/")
+        if not base_url and pconfig:
+            base_url = (pconfig.inference_base_url or "").rstrip("/")
+        if not base_url:
+            return _err(rid, 5044, f"unknown provider: {provider}")
+
+        try:
+            timeout_ms = int(params.get("timeout_ms", 8000))
+        except (TypeError, ValueError):
+            timeout_ms = 8000
+        timeout_ms = max(1000, min(timeout_ms, 30000))
+
+        result = _fetch_provider_model_ids(base_url, api_key, timeout_ms / 1000.0)
+        return _ok(rid, {
+            "ok": result["ok"],
+            "models": result["model_ids"],
+            "model_count": len(result["model_ids"]),
+            "status_code": result["status_code"],
+            "error": result["error"],
+            "error_kind": result["error_kind"],
+        })
+    except Exception as e:
+        return _err(rid, 5045, str(e))
 
 
 @method("model.save_key")
