@@ -6,6 +6,7 @@ This document explains the fork-specific changes on `main` that diverge from ups
 
 | ID | Target file | What it does | Why we need it | Upstream status |
 |---|---|---|---|---|
+| **P-025** | `hermes_cli/web_server.py` | `/api/providers/oauth` now (1) serves from a 20s per-profile in-process TTL cache, (2) runs each provider's status check concurrently via `asyncio.to_thread` (OFF the FastAPI event loop) instead of serially inline, and (3) busts the cache on every connect/disconnect (disconnect clear paths, PKCE submit, device-code/loopback poll→`approved`). Adds a `refresh=true` escape hatch. | The desktop Models page enumerated every OAuth provider's status serially on every open AND every window refocus; some checks touch the network/subprocess, and because the handler is `async` they blocked the event loop that also serves the chat gateway WebSocket — so 模型页 took seconds to open and could stutter live chat. | Should be upstreamed (generic responsiveness fix) |
 | **P-002** | `hermes_cli/web_server.py` | Adds `POST /api/upload` for dashboard attachment uploads | v2 web composer's drag-to-upload depends on it; upstream had it once (`e7c3cd772`) then reverted | Not in upstream |
 | **P-003** | `hermes_cli/web_server.py` | Drops the `_DASHBOARD_EMBEDDED_CHAT_ENABLED` gate on `/api/ws` | v2 runs `hermes dashboard` without `--tui`, the gate would close gateway WS | **Largely addressed upstream** — v0.16.0 (#38591) defaults the flag to `True` and removes the dashboard `--tui` flag; fork keeps the explicit gate removal on `/api/ws` as defense-in-depth |
 | **P-004** | `hermes_cli/web_server.py` | Adds `GET /api/fs/list` for the v2 web workspace picker | v2 `/new` task page browses directories instead of `window.prompt()` for path; restricted to user home subtree | Not in upstream |
@@ -30,9 +31,20 @@ This document explains the fork-specific changes on `main` that diverge from ups
 | **P-024** | `agent/agent_runtime_helpers.py`, `tests/run_agent/test_agent_guardrails.py`, `tests/run_agent/test_session_meta_filtering.py` | Adds empty-content filtering to `sanitize_api_messages`: drops `assistant`/`user`/`function` messages whose `content` is `""` and that carry no payload, while preserving assistant messages that still have `tool_calls`, `codex_reasoning_items`, `codex_message_items`, or `reasoning_content`. | MiMo v2.5 and strict OpenAI-compatible gateways reject messages with empty `content` (HTTP 400 / "text is not set"). Long sessions (e.g. Feishu 3-13h) can leave such messages behind after context compression/truncation. | Should be upstreamed |
 | **P-027** | `cli.py`, `tests/cli/test_cli_save_config_value.py` | `save_config_value()` writes the project-level `cli-config.yaml` only when it already exists; otherwise it writes/creates the **user** config — never creating a config inside the installed package / source tree. | The old `else project_config_path` branch created `<repo>/cli-config.yaml` whenever `HERMES_HOME` had no `config.yaml` (e.g. the test-hermetic home); under the parallel test runner this leaked the file across the 8 workers and polluted project-config reads (`load_cli_config` under `HERMES_IGNORE_USER_CONFIG`), making `test_ignore_user_config_flags` flaky. Writing config into the package dir is also wrong in production. | Should be upstreamed |
 | **P-023** | `tui_gateway/server.py` | The gateway turn-runner now delivers a leftover `/steer` as the next user turn. `run_conversation()` only injects steer into a *following* tool result; one that lands after the final tool batch (or in a text-only turn) is returned as `result["pending_steer"]`. `cli.py` re-delivers it, but the gateway dropped it — so steers sent from the desktop (which default to "steer" busy-input mode) silently vanished. Mirrors the existing `goal_followup` chain: after the `finally` releases `session["running"]`, fire a nested `_run_prompt_submit` with the steered text (guarded by `running` so a racing real prompt wins; takes priority over goal continuation). | Desktop report (#193): "引导功能不好用 … 等到任务执行完，我引导的东西也没插入进去" — a late steer was accepted by `agent.steer()` but never applied because the gateway ignored `pending_steer`. | Should be upstreamed (generic reliability fix) |
+| **P-026** | `hermes_constants.py`, `hermes_bootstrap.py`, `tests/test_managed_runtime_caches.py` | `configure_managed_runtime_caches()` `setdefault`s third-party cache/temp env vars to subdirs of `<HERMES_HOME>/cache` when the desktop runs the managed runtime (`HERMES_DESKTOP_MANAGED=1`): `HF_HOME`, `HUGGINGFACE_HUB_CACHE`, `TORCH_HOME`, `TIKTOKEN_CACHE_DIR`, `MPLCONFIGDIR`, `NLTK_DATA`, `PLAYWRIGHT_BROWSERS_PATH`, and (only when none is set) `TMPDIR/TEMP/TMP`. Called from `hermes_bootstrap` (first import of every entry point) so it runs before transformers/tiktoken/playwright load. | Windows desktop disk-bloat: even after the desktop anchors its runtime tree to the chosen install drive, these libraries default their caches into `~/.cache` (C:), so picking D:\ at install still filled C:. `setdefault` + the `HERMES_DESKTOP_MANAGED` gate leave standalone CLI installs and explicit overrides untouched. | CN-desktop convergence; the env hooks are generic and could be upstreamed |
 
 > **P-001** (provider dict-vs-list mismatch in `tui_gateway/server.py`) — **dropped from this fork**. Upstream has since fixed it; the line `user_provs = cfg.get("providers")` in `_apply_model_switch` already does the right thing.
 ---
+
+### P-026: Converge third-party caches under HERMES_HOME for the desktop runtime
+
+**Symptom** (Windows desktop): users install the CN desktop to D:\ to spare a near-full C:, but C: keeps filling anyway. The desktop's own runtime tree is converged, yet Python libraries the kernel pulls in still scatter caches across the home dir on C:.
+
+**Root cause**: huggingface/transformers, torch, tiktoken, matplotlib, nltk and playwright each default their cache into the user home (`~/.cache/...`, `%USERPROFILE%\...`) unless their env var is set, and the managed runtime never set them — so they escaped the converged runtime root no matter which drive the app was installed to. Reachable hits in the runtime today are tiktoken (`hermes_cli/tools_config.py`) and the transformers tokenizer (`trajectory_compressor.py`); playwright already self-converges in `browser_tool.py`, but only for its subprocess env, not process-wide.
+
+**Fix**: `hermes_constants.configure_managed_runtime_caches()` `setdefault`s `HF_HOME`, `HUGGINGFACE_HUB_CACHE`, `TORCH_HOME`, `TIKTOKEN_CACHE_DIR`, `MPLCONFIGDIR`, `NLTK_DATA` and `PLAYWRIGHT_BROWSERS_PATH` to `<HERMES_HOME>/cache/<tool>`, and — only when no temp dir is already configured — points `TMPDIR/TEMP/TMP` at `<HERMES_HOME>/cache/tmp`. Because the desktop sets `HERMES_HOME` under its converged `runtime_root()` (anchored to the install dir on a fresh Windows install — see Hermes-CN-Desktop), these caches now follow onto the chosen drive. Gated on `HERMES_DESKTOP_MANAGED=1` and using `setdefault`, so standalone CLI installs keep their shared `~/.cache` (no surprise re-downloads) and any explicit value wins. Wired into `hermes_bootstrap` (imported first by every entry point) so it runs before transformers/tiktoken/playwright import.
+
+**Tests**: `tests/test_managed_runtime_caches.py` — no-op without `HERMES_DESKTOP_MANAGED`; sets the cache vars under HERMES_HOME when managed; `setdefault` never overrides a pre-set value; temp left alone when already configured.
 
 ### P-022: Streaming stale-stream detector — never wedge a turn on a dead provider connection
 
@@ -555,6 +567,27 @@ opening an upstream PR.
 - If an upstream caller intentionally passes an empty assistant message for some protocol reason, it will now be dropped unless it carries one of the recognized payloads.
 
 **Should we upstream?** Yes. The filter is provider-agnostic, guards against a real class of gateway rejections, and is covered by extensive tests.
+
+---
+
+### P-025: OAuth provider-status caching + concurrency (Models page responsiveness)
+
+**Symptom**: Opening the desktop **模型页 (Models page)** was very slow (multiple seconds of spinner), re-focusing the app re-triggered the slowness, and while it ran live chat streaming could also stutter.
+
+**Root cause**: `GET /api/providers/oauth` built the Accounts-tab list by iterating every OAuth-capable provider and calling its auth-status helper **serially**. A few helpers do real I/O (`httpx` calls, credential-store endpoint detection, `subprocess`). Two compounding problems:
+1. The desktop fetched this on every Models-page open and, via TanStack Query's `refetchOnWindowFocus`, on every window refocus — with no server-side cache.
+2. The handler is `async def` but the per-provider work is blocking, so it ran on the FastAPI event loop — the same loop that serves the `/api/ws` gateway WebSocket streaming chat. A slow enumeration therefore stalled chat too.
+
+**What the patch does** (`hermes_cli/web_server.py`):
+- Adds a small per-profile TTL cache (`_OAUTH_STATUS_CACHE`, 20s, lock-guarded) around the assembled `{"providers": [...]}` payload. Repeat opens / refocus refetches within the window are instant.
+- On a cache miss, resolves the profile's home as a context-local `set_hermes_home_override` (deliberately NOT the full `_profile_scope`, whose lock-protected skills-globals swap is unneeded here and unsafe to hold across the fan-out) and runs all `_resolve_provider_status` calls concurrently with `asyncio.gather(asyncio.to_thread(...))`. `asyncio.to_thread` copies the contextvar, so each worker resolves its auth store against the right profile, and the blocking work no longer touches the event loop. Wall-clock drops from sum-of-providers to ~slowest-provider.
+- Busts the cache on every state change: `DELETE /api/providers/oauth/{id}` (both clear paths), `POST .../submit` (PKCE), and `GET .../poll/...` when the session reaches `approved` (device-code / loopback). A `refresh=true` query param force-bypasses the cache.
+
+**Side effects**:
+- A connect/disconnect performed outside these endpoints (e.g. `hermes auth` in a terminal, or setting an API key via `/api/env`) is reflected after at most the 20s TTL rather than instantly.
+- Per-provider checks now run in parallel threads; each provider reads its own store, so there is no new cross-provider contention.
+
+**Should we upstream?** Yes — provider-agnostic responsiveness fix that also removes event-loop blocking from a hot dashboard endpoint.
 
 ---
 
